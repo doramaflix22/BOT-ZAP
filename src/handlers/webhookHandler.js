@@ -26,6 +26,16 @@ class WebhookHandler {
       webhookLogger.info(`Processing webhook event: ${event} for instance: ${instance}`);
 
       switch (event) {
+        case 'messages.upsert':
+          return await this.handleMessageUpsert(instance, data);
+        
+        case 'connection.update':
+          return await this.handleConnectionUpdate(instance, data);
+        
+        case 'qrcode.updated':
+          return await this.handleQRCodeUpdated(instance, data);
+        
+        // Compatibilidade com formato antigo
         case 'MESSAGES_UPSERT':
           return await this.handleMessageUpsert(instance, data);
         

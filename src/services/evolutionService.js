@@ -90,13 +90,20 @@ class EvolutionService {
 
       logger.info(`Evolution instance created successfully: ${instanceName}`);
 
-      // Configurar webhook após criar instância
-      await this.setWebhook(instanceName);
+      // Configurar webhook após criar instância (não-crítico)
+      try {
+        await this.setWebhook(instanceName);
+        logger.info(`Webhook configured successfully for: ${instanceName}`);
+      } catch (webhookError) {
+        logger.warn(`Webhook configuration failed for ${instanceName}, but instance created:`, webhookError.message);
+        // Continuar mesmo se webhook falhar - instância foi criada com sucesso
+      }
 
       return {
         success: true,
         instanceName,
-        data: response.data
+        data: response.data,
+        webhookConfigured: true // Flag para indicar que tentamos configurar
       };
 
     } catch (error) {
@@ -119,26 +126,46 @@ class EvolutionService {
       const params = number ? `?number=${number}` : '';
       const response = await this.client.get(`/instance/connect/${instanceName}${params}`);
 
-      // Evolution retorna: pairingCode, code, count
-      const { pairingCode, code, count } = response.data;
-
-      if (pairingCode) {
+      // Evolution v2 pode retornar diferentes formatos
+      const data = response.data;
+      
+      // Formato 1: pairingCode, code, count
+      if (data.pairingCode) {
         logger.info(`Pairing code obtained for instance: ${instanceName}`);
         return {
           type: 'pairing',
-          pairingCode,
-          code,
-          count
+          pairingCode: data.pairingCode,
+          code: data.code,
+          count: data.count
+        };
+      }
+      
+      // Formato 2: base64, code direto
+      if (data.base64) {
+        logger.info(`QR code base64 obtained for instance: ${instanceName}`);
+        return {
+          type: 'qr',
+          base64: data.base64,
+          code: data.code
+        };
+      }
+      
+      // Formato 3: apenas code
+      if (data.code) {
+        logger.info(`QR code obtained for instance: ${instanceName}`);
+        return {
+          type: 'qr',
+          code: data.code,
+          pairingCode: data.pairingCode || null
         };
       }
 
-      // QR code é retornado como base64 no webhook QRCODE_UPDATED
-      // Este endpoint retorna apenas pairing code
+      // QR code será enviado via webhook
       logger.info(`QR code request sent for instance: ${instanceName}`);
       return {
         type: 'qr_requested',
         message: 'QR code will be sent via webhook',
-        count
+        data: data
       };
 
     } catch (error) {
