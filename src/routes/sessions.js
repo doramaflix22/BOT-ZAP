@@ -10,12 +10,6 @@ const { controllerLogger } = require('../utils/logger');
 const router = express.Router();
 const sessionController = new SessionController();
 
-// Middleware para logging de requisições
-router.use((req, res, next) => {
-  const clientIp = req.ip || req.connection.remoteAddress;
-  controllerLogger.info(`${req.method} ${req.path} - IP: ${clientIp}`);
-  next();
-});
 
 /**
  * POST /api/sessions/connect/:storeId

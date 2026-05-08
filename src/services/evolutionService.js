@@ -65,6 +65,7 @@ class EvolutionService {
 
       const payload = {
         instanceName,
+        token: this.apiKey,
         integration: "WHATSAPP-BAILEYS",
         qrcode: true,
         rejectCall: true,
@@ -107,7 +108,13 @@ class EvolutionService {
       };
 
     } catch (error) {
-      logger.error(`Failed to create Evolution instance for store ${storeId}:`, error);
+      logger.error(`Failed to create Evolution instance for store ${storeId}:`, {
+        message: error.message,
+        response: error.response?.data,
+        status: error.response?.status,
+        stack: error.stack,
+        instanceName: `store_${storeId}`
+      });
       throw new Error(`Evolution API Error: ${error.response?.data?.message || error.message}`);
     }
   }
@@ -447,37 +454,6 @@ class EvolutionService {
     }
   }
 
-  /**
-   * Obter informações da instância
-   * 
-   * @param {string} instanceName - Nome da instância
-   * @returns {Promise<Object>} Informações da instância
-   */
-  async getInstanceInfo(instanceName) {
-    try {
-      logger.debug(`Getting instance info: ${instanceName}`);
-
-      const response = await this.client.get(`/instance/fetchInstances?instanceName=${instanceName}`);
-
-      const instance = response.data.find(i => i.instanceName === instanceName);
-
-      if (!instance) {
-        throw new Error(`Instance ${instanceName} not found`);
-      }
-
-      return {
-        instanceName: instance.instanceName,
-        status: instance.status,
-        owner: instance.owner,
-        profilePicUrl: instance.profilePicUrl,
-        phone: instance.phone
-      };
-
-    } catch (error) {
-      logger.error(`Failed to get instance info for ${instanceName}:`, error);
-      throw new Error(`Evolution API Error: ${error.response?.data?.message || error.message}`);
-    }
   }
-}
 
 module.exports = EvolutionService;
