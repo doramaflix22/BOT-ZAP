@@ -66,10 +66,51 @@ class SessionController {
 
       const instanceName = `store_${storeId}`;
       
-      // Verificar se instância já existe na Evolution
-      const exists = await this.evolutionService.instanceExists(instanceName);
+      // Verificar se já existe sessão pendente/connectando
+      if (
+        existingSession &&
+        ['connecting', 'qr'].includes(existingSession.connection_status)
+      ) {
+        controllerLogger.info(`Reusing existing session for store: ${storeId}`);
+        
+        // Se tiver QR válido, retornar
+        if (existingSession.qr_code && this.isValidQRCodeFormat(existingSession.qr_code)) {
+          return {
+            success: true,
+            status: 'qr_existing',
+            message: 'Existing QR Code',
+            data: {
+              qr: existingSession.qr_code,
+              connectionStatus: existingSession.connection_status,
+              timestamp: existingSession.updated_at
+            }
+          };
+        }
+        
+        // Tentar obter QR novo da instância existente
+        try {
+          const qrCode = await this.evolutionService.getQRCode(instanceName);
+          await this.supabaseService.updateQRCode(storeId, qrCode);
+          
+          return {
+            success: true,
+            status: 'qr_refreshed',
+            message: 'QR Code refreshed',
+            data: {
+              qr: qrCode,
+              connectionStatus: 'qr'
+            }
+          };
+        } catch (error) {
+          controllerLogger.warn(`Failed to refresh QR for existing instance: ${error.message}`);
+          // Continuar com QR existente mesmo que seja inválido
+        }
+      }
       
-      if (!exists) {
+      // Verificar se instância já existe na Evolution
+      const instanceInfo = await this.evolutionService.getInstanceInfo(instanceName);
+      
+      if (!instanceInfo) {
         // Criar nova instância
         const instanceResult = await this.evolutionService.createInstance(storeId);
         
@@ -79,7 +120,7 @@ class SessionController {
         
         controllerLogger.info(`New instance created: ${instanceName}`);
       } else {
-        controllerLogger.info(`Instance already exists: ${instanceName}`);
+        controllerLogger.info(`Reusing existing instance: ${instanceName}`);
       }
       
       // Obter QR Code

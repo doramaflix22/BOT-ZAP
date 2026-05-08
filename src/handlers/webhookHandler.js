@@ -354,6 +354,21 @@ class WebhookHandler {
         return { success: false, reason: 'Invalid instance format' };
       }
 
+      // Verificar status atual da sessão
+      const currentSession = await this.supabaseService.getSession(storeId);
+      
+      // Se já estiver conectado, ignorar QR
+      if (currentSession?.connection_status === 'connected') {
+        webhookLogger.info(`QR update ignored for store ${storeId} - already connected`);
+        return {
+          success: true,
+          storeId,
+          instanceName,
+          action: 'ignored_connected',
+          message: 'Session already connected'
+        };
+      }
+
       // Extrair QR code bruto
       const rawQRCode = qrData.qrcode?.base64 || qrData.qrcode;
       
@@ -364,9 +379,6 @@ class WebhookHandler {
         webhookLogger.warn(`Invalid QR code received for store ${storeId}`);
         return { success: false, reason: 'Invalid QR code format' };
       }
-
-      // Verificar duplicação no banco ANTES de salvar
-      const currentSession = await this.supabaseService.getSession(storeId);
       if (currentSession?.qr_code === formattedQRCode) {
         webhookLogger.info(`Duplicate QR ignored for store ${storeId} (same as database)`);
         return {

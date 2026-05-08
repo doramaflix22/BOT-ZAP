@@ -135,6 +135,28 @@ class EvolutionService {
   }
 
   /**
+   * Obter informações da instância da Evolution
+   * 
+   * @param {string} instanceName - Nome da instância
+   * @returns {Promise<Object|null>} Informações da instância
+   */
+  async getInstanceInfo(instanceName) {
+    try {
+      const response = await this.client.get(`/instance/fetchInstances`);
+      const instances = response.data || [];
+      
+      return instances.find(
+        instance => instance.name === instanceName ||
+                    instance.instanceName === instanceName
+      ) || null;
+      
+    } catch (error) {
+      logger.error(`Failed to get instance info for ${instanceName}:`, error);
+      return null;
+    }
+  }
+
+  /**
    * Obter QR Code da instância
    * 
    * @param {string} instanceName - Nome da instância
