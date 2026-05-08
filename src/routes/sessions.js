@@ -13,7 +13,7 @@ const sessionController = new SessionController();
 // Middleware para logging de requisições
 router.use((req, res, next) => {
   const clientIp = req.ip || req.connection.remoteAddress;
-  controllerLogger.info(`${req.method} ${req.path} - IP: ${clientIp} - Store: ${req.params.storeId}`);
+  controllerLogger.info(`${req.method} ${req.path} - IP: ${clientIp}`);
   next();
 });
 
@@ -24,6 +24,9 @@ router.use((req, res, next) => {
 router.post('/connect/:storeId', async (req, res) => {
   try {
     const { storeId } = req.params;
+    
+    // Logging específico com storeId disponível
+    controllerLogger.info(`POST /connect/${storeId} - Store: ${storeId}`);
 
     // Validação do storeId
     if (!storeId || typeof storeId !== 'string' || storeId.length < 3) {
