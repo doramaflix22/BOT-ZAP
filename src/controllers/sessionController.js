@@ -66,62 +66,34 @@ class SessionController {
 
       const instanceName = `store_${storeId}`;
       
-      // Verificar se já existe sessão pendente/connectando
+      // Verificar se já existe QR code válido para reutilizar
       if (
         existingSession &&
-        ['connecting', 'qr'].includes(existingSession.connection_status)
+        existingSession.connection_status === 'qr' &&
+        existingSession.qr_code &&
+        this.isValidQRCodeFormat(existingSession.qr_code)
       ) {
-        controllerLogger.info(`Reusing existing session for store: ${storeId}`);
-        
-        // Se tiver QR válido, retornar
-        if (existingSession.qr_code && this.isValidQRCodeFormat(existingSession.qr_code)) {
-          return {
-            success: true,
-            status: 'qr_existing',
-            message: 'Existing QR Code',
-            data: {
-              qr: existingSession.qr_code,
-              connectionStatus: existingSession.connection_status,
-              timestamp: existingSession.updated_at
-            }
-          };
-        }
-        
-        // Tentar obter QR novo da instância existente
-        try {
-          const qrCode = await this.evolutionService.getQRCode(instanceName);
-          await this.supabaseService.updateQRCode(storeId, qrCode);
-          
-          return {
-            success: true,
-            status: 'qr_refreshed',
-            message: 'QR Code refreshed',
-            data: {
-              qr: qrCode,
-              connectionStatus: 'qr'
-            }
-          };
-        } catch (error) {
-          controllerLogger.warn(`Failed to refresh QR for existing instance: ${error.message}`);
-          // Continuar com QR existente mesmo que seja inválido
-        }
+        controllerLogger.info(`Reusing existing QR code for store: ${storeId}`);
+        return {
+          success: true,
+          status: 'qr_existing',
+          message: 'Existing QR Code',
+          data: {
+            qr: existingSession.qr_code,
+            connectionStatus: existingSession.connection_status,
+            timestamp: existingSession.updated_at
+          }
+        };
+      }
+
+      // Criar nova instância (fluxo original funcionando)
+      const instanceResult = await this.evolutionService.createInstance(storeId);
+      
+      if (!instanceResult.success) {
+        throw new Error('Failed to create Evolution instance');
       }
       
-      // Verificar se instância já existe na Evolution
-      const instanceInfo = await this.evolutionService.getInstanceInfo(instanceName);
-      
-      if (!instanceInfo) {
-        // Criar nova instância
-        const instanceResult = await this.evolutionService.createInstance(storeId);
-        
-        if (!instanceResult.success) {
-          throw new Error('Failed to create Evolution instance');
-        }
-        
-        controllerLogger.info(`New instance created: ${instanceName}`);
-      } else {
-        controllerLogger.info(`Reusing existing instance: ${instanceName}`);
-      }
+      controllerLogger.info(`New instance created: ${instanceName}`);
       
       // Obter QR Code
       const qrCode = await this.evolutionService.getQRCode(instanceName);
