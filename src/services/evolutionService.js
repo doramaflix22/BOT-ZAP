@@ -143,7 +143,14 @@ class EvolutionService {
   async getInstanceInfo(instanceName) {
     try {
       const response = await this.client.get(`/instance/fetchInstances`);
-      const instances = response.data || [];
+      
+      // Validação robusta da resposta
+      if (!response.data || !Array.isArray(response.data)) {
+        logger.warn(`Invalid response from Evolution API:`, response.data);
+        return null;
+      }
+      
+      const instances = response.data;
       
       return instances.find(
         instance => instance.name === instanceName ||
@@ -151,7 +158,7 @@ class EvolutionService {
       ) || null;
       
     } catch (error) {
-      logger.error(`Failed to get instance info for ${instanceName}:`, error);
+      logger.warn(`Instance ${instanceName} not found or inaccessible:`, error.message);
       return null;
     }
   }
