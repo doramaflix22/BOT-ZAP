@@ -222,7 +222,18 @@ class WebhookHandler {
     try {
       webhookLogger.info(`Processing QR code update for ${instanceName}`);
 
-      const { qrcode } = qrData;
+      // Extrair QR code e corrigir formato
+      let qrCode = qrData.qrcode?.base64 || qrData.qrcode;
+      
+      // Remover base64:// duplicado se existir
+      if (qrCode && qrCode.startsWith('base64://')) {
+        qrCode = qrCode.replace('base64://', '');
+      }
+      
+      // Garantir formato correto data:image/png;base64,
+      if (qrCode && !qrCode.startsWith('data:image')) {
+        qrCode = `data:image/png;base64,${qrCode}`;
+      }
       
       // Extrair store_id
       const storeId = this.extractStoreIdFromInstance(instanceName);
@@ -233,7 +244,7 @@ class WebhookHandler {
       }
 
       // Atualizar QR Code no Supabase
-      await this.supabaseService.updateQRCode(storeId, qrcode);
+      await this.supabaseService.updateQRCode(storeId, qrCode);
 
       webhookLogger.info(`QR Code updated for store ${storeId}`);
 

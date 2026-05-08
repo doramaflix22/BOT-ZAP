@@ -28,9 +28,10 @@ class SessionController {
         throw new Error('Invalid store ID format');
       }
 
-      // Verificar se já existe sessão ativa
+      // Verificar se já existe sessão
       const existingSession = await this.supabaseService.getSession(storeId);
       
+      // Se já conectado, retornar status
       if (existingSession && existingSession.connection_status === 'connected') {
         controllerLogger.info(`WhatsApp already connected for store: ${storeId}`);
         return {
@@ -44,16 +45,43 @@ class SessionController {
           }
         };
       }
-
-      // Criar instância Evolution
-      const instanceResult = await this.evolutionService.createInstance(storeId);
       
-      if (!instanceResult.success) {
-        throw new Error('Failed to create Evolution instance');
+      // Se existe QR code válido, reutilizar
+      if (
+        existingSession &&
+        existingSession.connection_status === 'qr' &&
+        existingSession.qr_code
+      ) {
+        controllerLogger.info(`Reusing existing QR code for store: ${storeId}`);
+        return {
+          success: true,
+          status: 'qr_existing',
+          message: 'Existing QR Code',
+          data: {
+            qr: existingSession.qr_code,
+            connectionStatus: 'qr'
+          }
+        };
       }
 
-      const instanceName = instanceResult.instanceName;
-
+      const instanceName = `store_${storeId}`;
+      
+      // Verificar se instância já existe na Evolution
+      const exists = await this.evolutionService.instanceExists(instanceName);
+      
+      if (!exists) {
+        // Criar nova instância
+        const instanceResult = await this.evolutionService.createInstance(storeId);
+        
+        if (!instanceResult.success) {
+          throw new Error('Failed to create Evolution instance');
+        }
+        
+        controllerLogger.info(`New instance created: ${instanceName}`);
+      } else {
+        controllerLogger.info(`Instance already exists: ${instanceName}`);
+      }
+      
       // Obter QR Code
       const qrCode = await this.evolutionService.getQRCode(instanceName);
 

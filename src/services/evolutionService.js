@@ -113,6 +113,28 @@ class EvolutionService {
   }
 
   /**
+   * Verificar se instância já existe na Evolution
+   * 
+   * @param {string} instanceName - Nome da instância
+   * @returns {Promise<boolean>} True se existe
+   */
+  async instanceExists(instanceName) {
+    try {
+      const response = await this.client.get('/instance/fetchInstances');
+      const instances = response.data || [];
+
+      return instances.some(
+        instance => instance.name === instanceName ||
+                    instance.instanceName === instanceName
+      );
+
+    } catch (error) {
+      logger.error('Failed to check instance existence:', error);
+      return false;
+    }
+  }
+
+  /**
    * Obter QR Code da instância
    * 
    * @param {string} instanceName - Nome da instância
