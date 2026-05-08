@@ -179,6 +179,14 @@ class SupabaseService {
    */
   async updateQRCode(storeId, qrCode) {
     try {
+      // Verificar se QR é duplicado ANTES de atualizar
+      const currentSession = await this.getSession(storeId);
+      
+      if (currentSession?.qr_code === qrCode) {
+        supabaseLogger.info(`Duplicate QR ignored for store ${storeId} (same as database)`);
+        return currentSession;
+      }
+
       const { data, error } = await this.client
         .from('whatsapp_sessions')
         .update({
@@ -193,10 +201,20 @@ class SupabaseService {
 
       if (error) throw error;
 
-      supabaseLogger.info(`QR Code updated for store ${storeId}`);
+      supabaseLogger.info(`QR Code updated for store ${storeId}`, {
+        qrLength: qrCode ? qrCode.length : 0,
+        format: qrCode?.startsWith('data:image/png;base64,') ? 'valid' : 'invalid',
+        previousQR: currentSession?.qr_code ? 'exists' : 'none'
+      });
+      
       return data;
     } catch (error) {
-      supabaseLogger.error(`Failed to update QR Code for store ${storeId}:`, error);
+      supabaseLogger.error(`Failed to update QR Code for store ${storeId}:`, {
+        message: error.message,
+        details: error.details,
+        hint: error.hint,
+        code: error.code
+      });
       throw error;
     }
   }

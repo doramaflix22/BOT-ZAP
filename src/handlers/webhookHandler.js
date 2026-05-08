@@ -11,6 +11,114 @@ class WebhookHandler {
   constructor() {
     this.autoReplyService = new AutoReplyService();
     this.supabaseService = new SupabaseService();
+    
+    // Cache para deduplicação de QR codes
+    this.qrCodeCache = new Map();
+    this.QR_CACHE_TTL = 30000; // 30 segundos
+    
+    // Lock para evitar processamento simultâneo
+    this.processingQRCodes = new Set();
+  }
+
+  /**
+   * Validar e formatar QR code
+   * 
+   * @param {string} qrCode - QR code bruto
+   * @returns {string|null} QR code formatado ou null se inválido
+   */
+  validateAndFormatQRCode(qrCode) {
+    if (!qrCode || typeof qrCode !== 'string') {
+      return null;
+    }
+
+    let formattedQR = qrCode.trim();
+
+    // Remover prefixos inválidos
+    if (formattedQR.startsWith('base64://')) {
+      formattedQR = formattedQR.replace('base64://', '');
+    }
+
+    // Garantir formato correto data:image/png;base64,
+    if (!formattedQR.startsWith('data:image')) {
+      if (formattedQR.startsWith('data:')) {
+        // Já tem data: mas não tem image/png
+        formattedQR = formattedQR.replace('data:', 'data:image/png;base64,');
+      } else {
+        // Não tem data: prefix
+        formattedQR = `data:image/png;base64,${formattedQR}`;
+      }
+    }
+
+    // Validação básica do formato base64
+    try {
+      const base64Part = formattedQR.split(',')[1];
+      if (!base64Part || base64Part.length < 100) {
+        return null; // QR code muito curto ou inválido
+      }
+      
+      // Testar se é base64 válido
+      Buffer.from(base64Part, 'base64');
+      
+      return formattedQR;
+    } catch (error) {
+      webhookLogger.warn('Invalid QR code format:', error.message);
+      return null;
+    }
+  }
+
+  /**
+   * Verificar se QR code é duplicado (cache)
+   * 
+   * @param {string} storeId - ID da loja
+   * @param {string} qrCode - QR code formatado
+   * @returns {boolean} True se é duplicado
+   */
+  isQRCodeDuplicate(storeId, qrCode) {
+    const cacheKey = `${storeId}_qr`;
+    const cached = this.qrCodeCache.get(cacheKey);
+    
+    if (!cached) {
+      return false;
+    }
+    
+    // Verificar se o QR code é o mesmo
+    if (cached.qrCode === qrCode) {
+      const now = Date.now();
+      if (now - cached.timestamp < this.QR_CACHE_TTL) {
+        return true; // Duplicado dentro do TTL
+      }
+    }
+    
+    return false;
+  }
+
+  /**
+   * Salvar QR code no cache
+   * 
+   * @param {string} storeId - ID da loja
+   * @param {string} qrCode - QR code formatado
+   */
+  cacheQRCode(storeId, qrCode) {
+    const cacheKey = `${storeId}_qr`;
+    this.qrCodeCache.set(cacheKey, {
+      qrCode,
+      timestamp: Date.now()
+    });
+    
+    // Limpar cache antigo periodicamente
+    this.cleanQRCache();
+  }
+
+  /**
+   * Limpar cache antigo
+   */
+  cleanQRCache() {
+    const now = Date.now();
+    for (const [key, value] of this.qrCodeCache.entries()) {
+      if (now - value.timestamp > this.QR_CACHE_TTL) {
+        this.qrCodeCache.delete(key);
+      }
+    }
   }
 
   /**
@@ -219,22 +327,25 @@ class WebhookHandler {
    * @returns {Promise<Object>} Resultado do processamento
    */
   async handleQRCodeUpdated(instanceName, qrData) {
+    const processKey = `${instanceName}_qr`;
+    
+    // Verificar lock anti-duplicação
+    if (this.processingQRCodes.has(processKey)) {
+      webhookLogger.warn(`QR update already processing for ${instanceName}`);
+      return {
+        success: true,
+        instanceName,
+        action: 'ignored_locked',
+        message: 'QR update already in progress'
+      };
+    }
+
+    // Adicionar lock
+    this.processingQRCodes.add(processKey);
+    
     try {
       webhookLogger.info(`Processing QR code update for ${instanceName}`);
 
-      // Extrair QR code e corrigir formato
-      let qrCode = qrData.qrcode?.base64 || qrData.qrcode;
-      
-      // Remover base64:// duplicado se existir
-      if (qrCode && qrCode.startsWith('base64://')) {
-        qrCode = qrCode.replace('base64://', '');
-      }
-      
-      // Garantir formato correto data:image/png;base64,
-      if (qrCode && !qrCode.startsWith('data:image')) {
-        qrCode = `data:image/png;base64,${qrCode}`;
-      }
-      
       // Extrair store_id
       const storeId = this.extractStoreIdFromInstance(instanceName);
       
@@ -243,21 +354,74 @@ class WebhookHandler {
         return { success: false, reason: 'Invalid instance format' };
       }
 
-      // Atualizar QR Code no Supabase
-      await this.supabaseService.updateQRCode(storeId, qrCode);
+      // Extrair QR code bruto
+      const rawQRCode = qrData.qrcode?.base64 || qrData.qrcode;
+      
+      // Validar e formatar QR code
+      const formattedQRCode = this.validateAndFormatQRCode(rawQRCode);
+      
+      if (!formattedQRCode) {
+        webhookLogger.warn(`Invalid QR code received for store ${storeId}`);
+        return { success: false, reason: 'Invalid QR code format' };
+      }
 
-      webhookLogger.info(`QR Code updated for store ${storeId}`);
+      // Verificar duplicação no banco ANTES de salvar
+      const currentSession = await this.supabaseService.getSession(storeId);
+      if (currentSession?.qr_code === formattedQRCode) {
+        webhookLogger.info(`Duplicate QR ignored for store ${storeId} (same as database)`);
+        return {
+          success: true,
+          storeId,
+          instanceName,
+          action: 'ignored_duplicate',
+          message: 'QR code already exists'
+        };
+      }
+
+      // Verificar duplicação no cache
+      if (this.isQRCodeDuplicate(storeId, formattedQRCode)) {
+        webhookLogger.info(`Duplicate QR code ignored for store ${storeId} (cache)`);
+        return {
+          success: true,
+          storeId,
+          instanceName,
+          action: 'ignored_duplicate',
+          message: 'Duplicate QR code ignored'
+        };
+      }
+
+      // Salvar no cache
+      this.cacheQRCode(storeId, formattedQRCode);
+
+      // Atualizar QR Code no Supabase
+      await this.supabaseService.updateQRCode(storeId, formattedQRCode);
+
+      webhookLogger.info(`QR Code updated for store ${storeId}`, {
+        qrLength: formattedQRCode.length,
+        format: formattedQRCode.startsWith('data:image/png;base64,') ? 'valid' : 'invalid',
+        action: 'updated'
+      });
 
       return {
         success: true,
         storeId,
         instanceName,
-        qrCode: qrcode
+        qrCode: formattedQRCode,
+        action: 'updated'
       };
 
     } catch (error) {
-      webhookLogger.error('Error handling QR code update:', error);
+      webhookLogger.error('Error handling QR code update:', {
+        message: error.message,
+        stack: error.stack,
+        response: error.response?.data,
+        instanceName,
+        qrData: JSON.stringify(qrData).substring(0, 500) // Primeiros 500 chars
+      });
       return { success: false, error: error.message };
+    } finally {
+      // Remover lock
+      this.processingQRCodes.delete(processKey);
     }
   }
 

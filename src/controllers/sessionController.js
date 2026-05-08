@@ -183,6 +183,37 @@ class SessionController {
   }
 
   /**
+   * Validar formato de QR code
+   * 
+   * @param {string} qrCode - QR code para validar
+   * @returns {boolean} True se formato válido
+   */
+  isValidQRCodeFormat(qrCode) {
+    if (!qrCode || typeof qrCode !== 'string') {
+      return false;
+    }
+
+    // Verificar formato data:image/png;base64,
+    if (!qrCode.startsWith('data:image/png;base64,')) {
+      return false;
+    }
+
+    // Verificar se tem conteúdo base64
+    const base64Part = qrCode.split(',')[1];
+    if (!base64Part || base64Part.length < 100) {
+      return false;
+    }
+
+    // Tentar decodificar para validar
+    try {
+      Buffer.from(base64Part, 'base64');
+      return true;
+    } catch (error) {
+      return false;
+    }
+  }
+
+  /**
    * Obter QR Code
    * 
    * @param {string} storeId - ID do restaurante
@@ -215,15 +246,23 @@ class SessionController {
         };
       }
 
-      // Se tiver QR no banco, retornar
+      // Se tiver QR no banco, validar formato antes de retornar
       if (session.qr_code) {
-        return {
-          success: true,
-          data: {
-            qr: session.qr_code,
-            status: session.connection_status
-          }
-        };
+        // Validar formato do QR code
+        if (this.isValidQRCodeFormat(session.qr_code)) {
+          return {
+            success: true,
+            data: {
+              qr: session.qr_code,
+              status: session.connection_status,
+              timestamp: session.updated_at
+            }
+          };
+        } else {
+          // QR inválido no banco, limpar
+          controllerLogger.warn(`Invalid QR format in database for store ${storeId}, clearing...`);
+          await this.supabaseService.updateQRCode(storeId, null);
+        }
       }
 
       // Tentar obter QR novo da Evolution
