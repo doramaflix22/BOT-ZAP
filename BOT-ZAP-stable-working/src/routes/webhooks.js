@@ -24,7 +24,21 @@ router.use((req, res, next) => {
  * Endpoint principal para receber webhooks da Evolution API
  */
 router.post('/evolution', async (req, res) => {
-  await webhookController.handleWebhook(req, res);
+  console.log('\n🔥 ROUTE /evolution CALLED');
+  console.log('Method:', req.method);
+  console.log('Body:', JSON.stringify(req.body, null, 2));
+  console.log('========================\n');
+  
+  try {
+    await webhookController.handleWebhook(req, res);
+  } catch (error) {
+    console.error('💥 ROUTE ERROR:', error);
+    console.error('💥 STACK:', error.stack);
+    res.status(500).json({
+      success: false,
+      error: 'Route error'
+    });
+  }
 });
 
 /**

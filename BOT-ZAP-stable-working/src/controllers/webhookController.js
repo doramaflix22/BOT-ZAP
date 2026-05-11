@@ -20,11 +20,21 @@ class WebhookController {
    */
   async handleWebhook(req, res) {
     try {
+      console.log('\n🔥 WEBHOOK CONTROLLER - RECEIVED REQUEST');
+      console.log('Method:', req.method);
+      console.log('Headers:', JSON.stringify(req.headers, null, 2));
+      console.log('Body:', JSON.stringify(req.body, null, 2));
+      console.log('========================\n');
+
       webhookLogger.info('Received webhook from Evolution API');
 
       // Validar webhook
-      if (!this.webhookHandler.validateWebhook(req)) {
+      const validationResult = this.webhookHandler.validateWebhook(req);
+      console.log('🔍 WEBHOOK VALIDATION RESULT:', validationResult);
+      
+      if (!validationResult) {
         webhookLogger.warn('Invalid webhook received');
+        console.log('❌ WEBHOOK VALIDATION FAILED');
         return res.status(400).json({
           success: false,
           error: 'Invalid webhook format'
@@ -32,9 +42,12 @@ class WebhookController {
       }
 
       const webhookData = req.body;
+      console.log('📋 WEBHOOK DATA:', JSON.stringify(webhookData, null, 2));
 
       // Processar evento
+      console.log('🔄 PROCESSING WEBHOOK...');
       const result = await this.webhookHandler.processWebhook(webhookData);
+      console.log('✅ WEBHOOK PROCESSING RESULT:', JSON.stringify(result, null, 2));
 
       // Retornar resposta rápida para Evolution API
       if (result.success) {
@@ -54,6 +67,8 @@ class WebhookController {
       webhookLogger.info(`Webhook processed: ${webhookData.event} for ${webhookData.instance}`);
 
     } catch (error) {
+      console.error('💥 WEBHOOK CONTROLLER ERROR:', error);
+      console.error('💥 ERROR STACK:', error.stack);
       webhookLogger.error('Error handling webhook:', error);
 
       // Sempre retornar 200 para Evolution API não fazer retry
