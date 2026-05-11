@@ -1,0 +1,67 @@
+# ===========================================
+# EVOLUTION API - RAILWAY ENVIRONMENT VARIABLES
+# Copie e cole estas variáveis no seu projeto Railway Evolution API
+# ===========================================
+
+# ✅ AUTENTICAÇÃO
+AUTHENTICATION_API_KEY=evo_f8K2mP9x_2026_secure
+
+# ✅ BANCO DE DADOS (PostgreSQL)
+DATABASE_CONNECTION_URI=${{Postgres.DATABASE_URL}}
+DATABASE_CONNECTION_CLIENT_NAME=evolution
+
+# ✅ REDIS (Cache/Sessões)
+REDIS_URI=${{Redis.REDIS_URL}}
+REDIS_ENABLED=true
+
+# ✅ SERVIDOR
+SERVER_TYPE=HTTP
+PORT=8080
+
+# ✅ WHATSAPP CONFIG
+DEL_EVENT_MESSAGES=true
+QRCODE_LIMIT=5
+
+# ✅ WEBHOOK GLOBAL
+WEBHOOK_GLOBAL_URL=https://bot-zap-production-9534.up.railway.app/api/webhooks/evolution
+WEBHOOK_GLOBAL_ENABLED=true
+WEBHOOK_WEBHOOK_BY_EVENTS=true
+
+# ✅ EVENTOS WEBHOOK
+WEBHOOK_GLOBAL_EVENTS=["APPLICATION_STARTUP","QRCODE_UPDATED","MESSAGES_UPSERT","CONNECTION_UPDATE"]
+
+# ✅ OUTRAS CONFIGURAÇÕES
+TYPEBOT_API_URL=https://api.typebot.io
+TYPEBOT_ENABLED=false
+
+# ===========================================
+# 📋 INSTRUÇÕES DE CONFIGURAÇÃO
+# ===========================================
+
+# 1. Crie 3 serviços no Railway:
+#    - Evolution API (deploy do repositório)
+#    - PostgreSQL (plugin oficial)
+#    - Redis (plugin oficial)
+
+# 2. Adicione estas Environment Variables no serviço Evolution API
+
+# 3. Verifique os nomes exatos dos serviços:
+#    - Se PostgreSQL → use ${{Postgres.DATABASE_URL}}
+#    - Se postgresql → use ${{postgresql.DATABASE_URL}}
+#    - Se Redis → use ${{Redis.REDIS_URL}}
+#    - Se redis-cache → use ${{redis-cache.REDIS_URL}}
+
+# 4. Deploy e teste a conexão
+
+# ===========================================
+# 🔗 URLs IMPORTANTES
+# ===========================================
+
+# Seu Backend WhatsApp Engine:
+# https://bot-zap-production-9534.up.railway.app/api
+
+# Evolution API (após deploy):
+# https://sua-evolution.railway.app
+
+# Webhook para configurar na Evolution:
+# https://bot-zap-production-9534.up.railway.app/api/webhooks/evolution

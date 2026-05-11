@@ -1,0 +1,43 @@
+{
+  "name": "whatsapp-engine-evolution",
+  "version": "2.0.0",
+  "description": "WhatsApp Engine com Evolution API v2 - Multi-tenant SaaS Ready",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "dev": "node src/index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [
+    "whatsapp",
+    "evolution-api",
+    "bot",
+    "auto-reply",
+    "nodejs",
+    "multi-tenant",
+    "saas"
+  ],
+  "author": "FrodFast Team",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.18.2",
+    "axios": "^1.6.2",
+    "pino": "^8.16.2",
+    "pino-pretty": "^10.2.3",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "@supabase/supabase-js": "^2.39.7"
+  },
+  "engines": {
+    "node": ">=18.0.0",
+    "npm": ">=8.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/frodfast/whatsapp-engine-evolution"
+  },
+  "bugs": {
+    "url": "https://github.com/frodfast/whatsapp-engine-evolution/issues"
+  },
+  "homepage": "https://github.com/frodfast/whatsapp-engine-evolution#readme"
+}
