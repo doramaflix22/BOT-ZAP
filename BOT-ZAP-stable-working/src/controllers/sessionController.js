@@ -71,17 +71,27 @@ class SessionController {
 
       controllerLogger.info(`Starting WhatsApp connection for store: ${storeId}`);
 
-      // 🛡️ TRAVA ANTI-DUPLICAÇÃO - Verificar se já está conectando
+      // 🛡️ TRAVA ANTI-DUPLICAÇÃO COM TIMEOUT - Verificar se já está conectando
       console.log('🔒 CHECKING CONNECTION LOCK...');
       const existingSession = await this.supabaseService.getSession(storeId);
       
       if (existingSession?.connection_status === 'connecting') {
-        console.log('⚠️ CONNECTION ALREADY IN PROGRESS - ABORTING');
-        return {
-          success: false,
-          message: 'Connection already in progress',
-          code: 'CONNECTION_IN_PROGRESS'
-        };
+        // 🛡️ TIMEOUT DA TRAVA: se estiver conectando há mais de 2 minutos, permite nova tentativa
+        const lockTimeout = 2 * 60 * 1000; // 2 minutos
+        const lastActivity = existingSession.last_activity ? new Date(existingSession.last_activity).getTime() : 0;
+        const lockAge = Date.now() - lastActivity;
+        
+        if (lockAge < lockTimeout) {
+          console.log('⚠️ CONNECTION ALREADY IN PROGRESS - ABORTING (lock age:', lockAge, 'ms)');
+          return {
+            success: false,
+            message: 'Connection already in progress',
+            code: 'CONNECTION_IN_PROGRESS',
+            lockAge: lockAge
+          };
+        } else {
+          console.log('⚠️ CONNECTION LOCK EXPIRED (lock age:', lockAge, 'ms) - PROCEEDING WITH NEW CONNECTION');
+        }
       }
       
       // 🛡️ MARCAR COMO "connecting" ANTES DE TUDO
@@ -165,8 +175,7 @@ class SessionController {
             await this.evolutionService.connectInstance(instanceName);
             console.log('✅ CONNECTION INITIATED');
 
-            // 📱 Gerar QR após conexão forçada
-            const qrCode = await this.evolutionService.getQRCode(instanceName);
+            // �️ QR VIRÁ VIA WEBHOOK - não chamar getQRCode manualmente
             
             const connectEnd = Date.now();
             const duration = connectEnd - connectStart;
@@ -179,11 +188,10 @@ class SessionController {
             
             return {
               success: true,
-              status: 'qr_generated',
-              message: 'New instance created, connected and QR generated',
+              status: 'connecting',
+              message: 'New instance created and connected - QR will arrive via webhook',
               data: {
                 instanceName,
-                qr: qrCode,
                 connectionStatus: 'qr'
               }
             };
@@ -205,7 +213,6 @@ class SessionController {
       // 🟢 CASO 2: EXISTE E JÁ CONECTADO
       if (connectionState && connectionState.connected) {
         console.log('🟢 INSTANCE EXISTS AND CONNECTED - RETURNING SESSION');
-        const qrCode = await this.evolutionService.getQRCode(instanceName);
         return {
           success: true,
           status: 'already_connected',
@@ -214,8 +221,7 @@ class SessionController {
             instanceName,
             connectionStatus: 'connected',
             phone: connectionState.phone,
-            profileName: connectionState.profileName,
-            qr: qrCode
+            profileName: connectionState.profileName
           }
         };
       }
@@ -238,7 +244,7 @@ class SessionController {
           // Opcional: poderia retornar erro aqui, mas vou continuar com phone salvo
         }
         
-        // �🔥 RECUPERAÇÃO DE INSTÂNCIA QUEBRADA
+        // 🔥 RECUPERAÇÃO DE INSTÂNCIA QUEBRADA
         if (connectionState.status === 'close' || connectionState.rawState === 'close') {
           console.log('♻️ Instance exists but is disconnected → forcing reconnect');
           
@@ -247,15 +253,14 @@ class SessionController {
             await this.evolutionService.connectInstance(instanceName);
             console.log('✅ RECONNECTION INITIATED');
             
-            // Gerar QR após reconexão
-            const qrCode = await this.evolutionService.getQRCode(instanceName);
+            // 🛡️ QR VIRÁ VIA WEBHOOK - não chamar getQRCode manualmente
+            
             return {
               success: true,
-              status: 'qr_generated',
-              message: 'Instance reconnected and QR generated',
+              status: 'connecting',
+              message: 'Instance reconnected - QR will arrive via webhook',
               data: {
                 instanceName,
-                qr: qrCode,
                 connectionStatus: 'qr',
                 phone: savedPhone // Phone salvo no banco
               }
@@ -266,15 +271,14 @@ class SessionController {
           }
         }
         
-        console.log('🟡 GENERATING QR FROM EXISTING INSTANCE');
-        const qrCode = await this.evolutionService.getQRCode(instanceName);
+        console.log('🟡 CONNECTING EXISTING INSTANCE - QR WILL ARRIVE VIA WEBHOOK');
+        // 🛡️ QR VIRÁ VIA WEBHOOK - não chamar getQRCode manualmente
         return {
           success: true,
-          status: 'qr_generated',
-          message: 'QR generated from existing instance',
+          status: 'connecting',
+          message: 'Connecting existing instance - QR will arrive via webhook',
           data: {
             instanceName,
-            qr: qrCode,
             connectionStatus: 'qr',
             phone: savedPhone // Phone salvo no banco
           }
@@ -284,14 +288,13 @@ class SessionController {
       // ❌ CASO 4: EXISTE MAS ESTADO DESCONHECIDO
       console.log('❌ INSTANCE EXISTS BUT STATE UNKNOWN - ATTEMPTING RECOVERY');
       try {
-        const qrCode = await this.evolutionService.getQRCode(instanceName);
+        // 🛡️ QR VIRÁ VIA WEBHOOK - não chamar getQRCode manualmente
         return {
           success: true,
-          status: 'qr_generated',
-          message: 'QR generated (recovery mode)',
+          status: 'connecting',
+          message: 'Attempting recovery - QR will arrive via webhook',
           data: {
             instanceName,
-            qr: qrCode,
             connectionStatus: 'qr'
           }
         };
@@ -357,17 +360,24 @@ class SessionController {
         status = 'disconnected';
       }
 
-      await this.supabaseService.updateConnectionStatus(storeId, status, {
-        phone: phone,
+      // 🛡️ PRESERVAR PHONE EXISTENTE - não sobrescrever com null
+      const updateData = {
         profile_name: profileName,
         is_connected: isConnected
-      });
+      };
+      
+      // Só atualizar phone se tiver valor (não null)
+      if (phone) {
+        updateData.phone = phone;
+      }
+
+      await this.supabaseService.updateConnectionStatus(storeId, status, updateData);
 
       console.log('✅ Database synced with Evolution reality:', {
         storeId,
         status,
         isConnected,
-        phone: phone ? '***' + phone.slice(-4) : null
+        phone: phone ? '***' + phone.slice(-4) : 'preserved'
       });
 
     } catch (error) {

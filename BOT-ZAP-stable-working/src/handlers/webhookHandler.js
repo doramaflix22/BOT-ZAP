@@ -306,6 +306,14 @@ class WebhookHandler {
 
       webhookLogger.info(`Processing QR code update for ${instanceName}`);
 
+      // 🛡️ EXTRAIR storeId DO instance_name (CRÍTICO)
+      const storeId = this.extractStoreIdFromInstance(instanceName);
+      
+      if (!storeId) {
+        webhookLogger.error(`Invalid instance format: ${instanceName}`);
+        return { success: false, reason: 'Invalid instance format' };
+      }
+
       // 🛡️ EVOLUTION API PODE ENVIAR DIFERENTES FORMATOS
       let qrcode = qrData?.qrcode || qrData?.base64 || qrData?.code || qrData;
       
