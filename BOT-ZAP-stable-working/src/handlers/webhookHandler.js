@@ -241,26 +241,68 @@ class WebhookHandler {
       console.log('Additional Data:', additionalData);
       
       try {
-        // Salvar diretamente usando instance_name (mais confiável)
-        const { data, error } = await this.supabaseService.client
+        // 🛡️ VERIFICAR SE SESSÃO EXISTE ANTES DE ATUALIZAR
+        const { data: existingSession, error: checkError } = await this.supabaseService.client
           .from('whatsapp_sessions')
-          .update({
-            connection_status: mappedStatus,
-            last_activity: new Date().toISOString(),
-            updated_at: new Date().toISOString(),
-            ...additionalData
-          })
+          .select('store_id')
           .eq('instance_name', instanceName)
-          .select()
           .maybeSingle();
 
-        if (error) {
-          console.error('❌ FAILED TO SAVE CONNECTION UPDATE:', error);
-          throw error;
+        if (checkError) {
+          console.error('❌ ERROR CHECKING SESSION:', checkError);
+          throw checkError;
+        }
+
+        let result;
+        
+        if (!existingSession) {
+          // 🛡️ SESSÃO NÃO EXISTE - CRIAR PRIMEIRO
+          console.log('⚠️ SESSION NOT FOUND - CREATING NEW SESSION');
+          const { data: newSession, error: insertError } = await this.supabaseService.client
+            .from('whatsapp_sessions')
+            .insert({
+              store_id: storeId,
+              instance_name: instanceName,
+              connection_status: mappedStatus,
+              last_activity: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+              ...additionalData
+            })
+            .select()
+            .single();
+
+          if (insertError) {
+            console.error('❌ FAILED TO CREATE SESSION:', insertError);
+            throw insertError;
+          }
+
+          result = newSession;
+          console.log('✅ NEW SESSION CREATED:', result);
+        } else {
+          // 🛡️ SESSÃO EXISTE - ATUALIZAR
+          const { data: updatedSession, error: updateError } = await this.supabaseService.client
+            .from('whatsapp_sessions')
+            .update({
+              connection_status: mappedStatus,
+              last_activity: new Date().toISOString(),
+              updated_at: new Date().toISOString(),
+              ...additionalData
+            })
+            .eq('instance_name', instanceName)
+            .select()
+            .maybeSingle();
+
+          if (updateError) {
+            console.error('❌ FAILED TO UPDATE SESSION:', updateError);
+            throw updateError;
+          }
+
+          result = updatedSession;
+          console.log('✅ SESSION UPDATED:', result);
         }
 
         console.log('✅ CONNECTION UPDATE SAVED SUCCESSFULLY');
-        console.log('Updated Session:', data);
+        console.log('Result Session:', result);
 
       } catch (saveError) {
         console.error('💥 CONNECTION UPDATE SAVE ERROR:', saveError);
@@ -344,26 +386,68 @@ class WebhookHandler {
       console.log('QR Length:', qrcode?.length || 0);
       
       try {
-        // Salvar QR diretamente usando instance_name (mais confiável)
-        const { data, error } = await this.supabaseService.client
+        // 🛡️ VERIFICAR SE SESSÃO EXISTE ANTES DE ATUALIZAR
+        const { data: existingSession, error: checkError } = await this.supabaseService.client
           .from('whatsapp_sessions')
-          .update({
-            qr_code: qrcode,
-            connection_status: 'qr',
-            last_activity: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          })
+          .select('store_id')
           .eq('instance_name', instanceName)
-          .select()
           .maybeSingle();
 
-        if (error) {
-          console.error('❌ FAILED TO SAVE QR:', error);
-          throw error;
+        if (checkError) {
+          console.error('❌ ERROR CHECKING SESSION:', checkError);
+          throw checkError;
+        }
+
+        let result;
+        
+        if (!existingSession) {
+          // 🛡️ SESSÃO NÃO EXISTE - CRIAR PRIMEIRO
+          console.log('⚠️ SESSION NOT FOUND - CREATING NEW SESSION');
+          const { data: newSession, error: insertError } = await this.supabaseService.client
+            .from('whatsapp_sessions')
+            .insert({
+              store_id: storeId,
+              instance_name: instanceName,
+              qr_code: qrcode,
+              connection_status: 'qr',
+              last_activity: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            })
+            .select()
+            .single();
+
+          if (insertError) {
+            console.error('❌ FAILED TO CREATE SESSION:', insertError);
+            throw insertError;
+          }
+
+          result = newSession;
+          console.log('✅ NEW SESSION CREATED:', result);
+        } else {
+          // 🛡️ SESSÃO EXISTE - ATUALIZAR
+          const { data: updatedSession, error: updateError } = await this.supabaseService.client
+            .from('whatsapp_sessions')
+            .update({
+              qr_code: qrcode,
+              connection_status: 'qr',
+              last_activity: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            })
+            .eq('instance_name', instanceName)
+            .select()
+            .maybeSingle();
+
+          if (updateError) {
+            console.error('❌ FAILED TO UPDATE SESSION:', updateError);
+            throw updateError;
+          }
+
+          result = updatedSession;
+          console.log('✅ SESSION UPDATED:', result);
         }
 
         console.log('✅ QR SAVED SUCCESSFULLY');
-        console.log('Updated Session:', data);
+        console.log('Result Session:', result);
 
       } catch (saveError) {
         console.error('💥 QR SAVE ERROR:', saveError);
