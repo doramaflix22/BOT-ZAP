@@ -279,9 +279,9 @@ class EvolutionService {
   mapConnectionStatus(evolutionState) {
     const statusMap = {
       'open': 'connected',
-      'connecting': 'connecting',
+      'connecting': 'qr',  // 🛡️ Mudar para 'qr' para respeitar constraint do banco
       'close': 'disconnected',
-      'disconnecting': 'disconnecting'
+      'disconnecting': 'disconnected'
     };
 
     return statusMap[evolutionState] || 'unknown';
