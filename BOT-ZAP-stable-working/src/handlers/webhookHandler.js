@@ -371,18 +371,31 @@ class WebhookHandler {
         return { success: false, reason: 'Invalid instance format' };
       }
 
-      // 🛡️ EVOLUTION API PODE ENVIAR DIFERENTES FORMATOS
-      let qrcode = qrData?.qrcode || qrData?.base64 || qrData?.code || qrData;
+      // 🛡️ EVOLUTION API v2 - PRIORIZAR BASE64 COMO STRING
+      // Formato novo: { pairingCode, code, base64 }
+      const qrcode = qrData?.qrcode?.base64 || qrData?.qrcode?.code || qrData?.base64 || qrData?.code || qrData?.qrcode;
       
       console.log('🎯 EXTRACTED QR:', qrcode ? 'FOUND' : 'NOT FOUND');
       console.log('QR Type:', typeof qrcode);
       console.log('QR Length:', qrcode?.length || 0);
       
-      // Verificar duplicação de QR Code
+      // 🛡️ VERIFICAR DUPLICAÇÃO POR BASE64 E PAIRING CODE
+      const qrString = qrData?.qrcode?.base64 || qrData?.qrcode?.code || JSON.stringify(qrData?.qrcode);
+      const pairingCode = qrData?.qrcode?.pairingCode;
       const lastQr = this.lastQrByInstance.get(instanceName);
-      if (lastQr === qrcode) {
-        webhookLogger.debug(`Ignoring duplicate QR code for ${instanceName}`);
+      
+      // Verificar por base64 (string)
+      if (lastQr === qrString) {
+        webhookLogger.debug(`Ignoring duplicate QR code for ${instanceName} (base64)`);
         return { success: false, reason: 'Duplicate QR code ignored' };
+      }
+      
+      // Salvar string base64 no cache (não objeto)
+      this.lastQrByInstance.set(instanceName, qrString);
+      
+      // Log com pairingCode para debug
+      if (pairingCode) {
+        console.log(`🔑 Pairing Code: ${pairingCode}`);
       }
       
       // 🛡️ VALIDAÇÃO CRÍTICA - QR pode ser null

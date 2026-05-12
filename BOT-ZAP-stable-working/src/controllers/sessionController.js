@@ -505,33 +505,14 @@ class SessionController {
         };
       }
 
-      // Tentar obter QR novo da Evolution
-      try {
-        const instanceName = `store_${storeId}`;
-        const qrCode = await this.evolutionService.getQRCode(instanceName);
-
-        // Atualizar QR no banco
-        await this.supabaseService.updateQRCode(storeId, qrCode);
-
-        return {
-          success: true,
-          data: {
-            qr: qrCode,
-            status: 'connecting' // 🛡️ STATUS VÁLIDO
-          }
-        };
-
-      } catch (error) {
-        controllerLogger.warn(`Failed to get fresh QR for store ${storeId}:`, error);
-        
-        return {
-          success: true,
-          data: {
-            qr: null,
-            message: 'QR not available'
-          }
-        };
-      }
+      return {
+        success: true,
+        data: {
+          qr: null,
+          status: session.connection_status,
+          message: 'QR not available yet - wait for webhook'
+        }
+      };
 
     } catch (error) {
       controllerLogger.error(`Failed to get QR code for store ${storeId}:`, error);
