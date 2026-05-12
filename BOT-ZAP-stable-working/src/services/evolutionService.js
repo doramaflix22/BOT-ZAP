@@ -2,6 +2,30 @@
  * Evolution API Service - Adapter Pattern
  * Encapsula toda comunicação com Evolution API v2
  * Permite trocar de API sem afetar resto do código
+ * 
+ * 🛡️ HTTP METHODS CORRETOS EVOLUTION API v2:
+ * 
+ * 📋 INSTÂNCIAS:
+ * - GET /instance/fetchInstances → Listar todas instâncias
+ * - POST /instance/create → Criar nova instância
+ * - GET /instance/info/{instance} → Obter info da instância
+ * - POST /instance/connect/{instance} → Conectar instância
+ * - POST /instance/restart/{instance} → Reiniciar instância
+ * - DELETE /instance/logout/{instance} → Logout da instância
+ * - DELETE /instance/delete/{instance} → Deletar instância
+ * 
+ * 📋 QR CODE:
+ * - GET /instance/connect/{instance} → Obter QR code
+ * 
+ * 📋 WEBHOOK:
+ * - POST /webhook/set/{instance} → Configurar webhook (events: ["APPLICATION_STARTUP"])
+ * - GET /webhook/find/{instance} → Encontrar webhook
+ * 
+ * 📋 MENSAGENS:
+ * - POST /message/sendText/{instance} → Enviar texto (exato formato API)
+ * 
+ * 📋 STATUS:
+ * - GET /instance/connectionState/{instance} → Verificar status
  */
 
 const axios = require('axios');
@@ -88,18 +112,39 @@ class EvolutionService {
 
       logger.info(`Creating Evolution instance: ${instanceName} with phone: ${phoneNumber}`);
 
+      // 🛡️ GERAR TOKEN ÚNICO PARA INSTÂNCIA
+      const instanceToken = `token_${instanceName}_${Date.now()}`;
+
       const payload = {
         instanceName,
         integration: "WHATSAPP-BAILEYS",
+        token: instanceToken, // 🛡️ OBRIGATÓRIO: Token para autenticação da instância
         qrcode: true,
         rejectCall: true,
+        msgCall: "Chamadas de voz não são suportadas. Por favor, envie uma mensagem de texto.",
         groupsIgnore: true,
         alwaysOnline: false,
         readMessages: false,
         readStatus: false,
         syncFullHistory: false,
         // 🛡️ OBRIGATÓRIO: Número fornecido pelo usuário
-        number: phoneNumber
+        number: phoneNumber,
+        // 🛡️ OBRIGATÓRIO: Webhook configurado na criação para não perder eventos
+        webhook: {
+          url: this.webhookURL,
+          byEvents: true,
+          base64: true,
+          headers: {
+            authorization: `Bearer ${this.apiKey}`,
+            'Content-Type': 'application/json'
+          },
+          events: [
+            "QRCODE_UPDATED",     // 🛡️ ESSENCIAL: QR Code atualizado
+            "CONNECTION_UPDATE",   // 🛡️ ESSENCIAL: Mudanças de status
+            "APPLICATION_STARTUP", // 🛡️ ÚTIL: Inicialização da instância
+            "INSTANCE_DELETE"      // 🛡️ ÚTIL: Instância deletada
+          ]
+        }
       };
 
       // Motivo de cada campo:
@@ -116,21 +161,17 @@ class EvolutionService {
       const response = await this.client.post('/instance/create', payload);
 
       logger.info(`Evolution instance created successfully: ${instanceName}`);
+      logger.info(`Instance token: ${instanceToken}`);
+      logger.info(`Webhook configured: ${this.webhookURL}`);
 
-      // Configurar webhook após criar instância (não-crítico)
-      try {
-        await this.setWebhook(instanceName);
-        logger.info(`Webhook configured successfully for: ${instanceName}`);
-      } catch (webhookError) {
-        logger.warn(`Webhook configuration failed for ${instanceName}, but instance created:`, webhookError.message);
-        // Continuar mesmo se webhook falhar - instância foi criada com sucesso
-      }
+      // 🛡️ WEBHOOK JÁ CONFIGURADO NA CRIAÇÃO - não precisa mais configurar separadamente
 
       return {
         success: true,
         instanceName,
+        instanceToken,
         data: response.data,
-        webhookConfigured: true // Flag para indicar que tentamos configurar
+        webhookConfigured: true // 🛡️ Garantido - configurado na criação
       };
 
     } catch (error) {
@@ -161,6 +202,32 @@ class EvolutionService {
 
     } catch (error) {
       logger.error(`Failed to connect instance ${instanceName}:`, error);
+      throw new Error(`Evolution API Error: ${error.response?.data?.message || error.message}`);
+    }
+  }
+
+  /**
+   * Reiniciar instância WhatsApp
+   * 
+   * @param {string} instanceName - Nome da instância
+   * @returns {Promise<Object>} Resultado da reinicialização
+   */
+  async restartInstance(instanceName) {
+    try {
+      logger.info(`Restarting instance: ${instanceName}`);
+
+      const response = await this.client.post(`/instance/restart/${instanceName}`);
+
+      logger.info(`Instance restarted successfully: ${instanceName}`);
+
+      return {
+        success: true,
+        instanceName,
+        data: response.data
+      };
+
+    } catch (error) {
+      logger.error(`Failed to restart instance ${instanceName}:`, error);
       throw new Error(`Evolution API Error: ${error.response?.data?.message || error.message}`);
     }
   }
@@ -289,6 +356,7 @@ class EvolutionService {
 
   /**
    * Configurar webhook para instância
+   * 🛡️ SEGUINDO EXATAMENTE O FORMATO DA EVOLUTION API v2
    * 
    * @param {string} instanceName - Nome da instância
    * @returns {Promise<void>}
@@ -297,20 +365,16 @@ class EvolutionService {
     try {
       logger.info(`Setting webhook for instance: ${instanceName}`);
 
+      // 🛡️ EXATAMENTE COMO A API PEDE
       const payload = {
         enabled: true,
         url: this.webhookURL,
-        webhookByEvents: true,  // true = webhook apenas para eventos específicos
-        webhookBase64: true,    // true = QR em base64
+        webhookByEvents: true,
+        webhookBase64: true,
         events: [
-          "QRCODE_UPDATED",     // QR atualizado - ESSENCIAL
-          "CONNECTION_UPDATE"   // Mudanças de status - ESSENCIAL
+          "APPLICATION_STARTUP"  // 🛡️ EXATAMENTE como na documentação da API
         ]
       };
-
-      // Motivo dos eventos:
-      // - QRCODE_UPDATED: ESSENCIAL para receber QR Codes
-      // - CONNECTION_UPDATE: ESSENCIAL para monitorar status da conexão
 
       await this.client.post(`/webhook/set/${instanceName}`, payload);
 
@@ -323,7 +387,45 @@ class EvolutionService {
   }
 
   /**
+   * Gerar token para instância
+   * 
+   * @param {string} storeId - ID do restaurante
+   * @returns {string} Token único para a instância
+   */
+  generateInstanceToken(storeId) {
+    const instanceName = `store_${storeId}`;
+    return `token_${instanceName}_${Date.now()}`;
+  }
+
+  /**
+   * Encontrar configuração de webhook da instância
+   * 
+   * @param {string} instanceName - Nome da instância
+   * @returns {Promise<Object>} Configuração do webhook
+   */
+  async findWebhook(instanceName) {
+    try {
+      logger.debug(`Finding webhook configuration for instance: ${instanceName}`);
+
+      const response = await this.client.get(`/webhook/find/${instanceName}`);
+      
+      logger.debug(`Webhook found for instance: ${instanceName}`);
+
+      return {
+        success: true,
+        instanceName,
+        data: response.data
+      };
+
+    } catch (error) {
+      logger.error(`Failed to find webhook for instance ${instanceName}:`, error);
+      throw new Error(`Evolution API Error: ${error.response?.data?.message || error.message}`);
+    }
+  }
+
+  /**
    * Enviar mensagem de texto
+   * 🛡️ SEGUINDO EXATAMENTE O FORMATO DA EVOLUTION API v2
    * 
    * @param {string} instanceName - Nome da instância
    * @param {string} number - Número de telefone (com DDI e DDD)
@@ -335,38 +437,27 @@ class EvolutionService {
     try {
       logger.info(`Sending text message via ${instanceName} to ${number}`);
 
-      // Validação e formatação do número
-      const formattedNumber = this.formatPhoneNumber(number);
-
+      // 🛡️ EXATAMENTE COMO A API PEDE - sem formatação automática
       const payload = {
-        number: formattedNumber,
+        number: number,  // 🛡️ USAR NÚMERO EXATO COMO ENVIADO
         text: text,
-        // Opções padrão e personalizadas
-        delay: options.delay || 1000,
-        linkPreview: options.linkPreview !== false, // default true
-        mentionsEveryOne: options.mentionsEveryOne || false,
-        mentioned: options.mentioned || []
+        delay: options.delay || 123,  // 🛡️ DEFAULT DA API
+        linkPreview: options.linkPreview !== false,
+        mentionsEveryOne: options.mentionsEveryOne || true,  // 🛡️ DEFAULT DA API
+        mentioned: options.mentioned || ['{{remoteJID}}']  // 🛡️ FORMATO DA API
       };
 
-      // Melhores práticas:
-      // - Formatar número corretamente (551199999999)
-      // - Usar delay para parecer natural
-      // - Habilitar link preview para cardápios
-      // - Respeitar limites de rate limiting
-
-      if (text.length > 4096) {
-        logger.warn(`Message too long (${text.length} chars), truncating to 4096`);
-        payload.text = text.substring(0, 4096);
-      }
-
-      // Adicionar quoted se fornecido
+      // 🛡️ ADICIONAR QUOTED SE FORNECIDO - EXATAMENTE COMO NA API
       if (options.quoted) {
-        payload.quoted = options.quoted;
+        payload.quoted = {
+          key: { id: options.quoted.id || '<string>' },
+          message: { conversation: options.quoted.message || '<string>' }
+        };
       }
 
       const response = await this.client.post(`/message/sendText/${instanceName}`, payload);
 
-      logger.info(`Message sent successfully via ${instanceName} to ${formattedNumber}`);
+      logger.info(`Message sent successfully via ${instanceName} to ${number}`);
 
       return {
         success: true,
