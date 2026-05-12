@@ -33,7 +33,13 @@ class WebhookHandler {
   async processWebhook(webhookData) {
     try {
       console.log('\n🔥 WEBHOOK PROCESSING START');
-      console.log('Full Payload:', JSON.stringify(webhookData, null, 2));
+      // 🛡️ LOG LEVE - sem base64 pesado
+      console.log({
+        event: webhookData.event,
+        instance: webhookData.instance,
+        hasQr: !!webhookData.data?.qrcode,
+        pairingCode: webhookData.data?.qrcode?.pairingCode
+      });
       console.log('========================\n');
 
       const { event, instance, data } = webhookData;
@@ -100,8 +106,13 @@ class WebhookHandler {
    */
   async handleMessageUpsert(instanceName, messageData) {
     try {
-      console.log('\n🔥 MESSAGE UPSERT PAYLOAD');
-      console.log(JSON.stringify(messageData, null, 2));
+      console.log('\n🔥 MESSAGE UPSERT PROCESSING');
+      // 🛡️ LOG LEVE - sem payload completo
+      console.log({
+        instance: instanceName,
+        hasMessage: !!messageData,
+        messageType: messageData?.message?.conversation ? 'text' : 'other'
+      });
       console.log('========================\n');
 
       webhookLogger.info(`Processing message upsert for ${instanceName}`);
@@ -340,10 +351,14 @@ class WebhookHandler {
    */
   async handleQRCodeUpdated(instanceName, qrData) {
     try {
-      console.log('\n🔥 QR WEBHOOK PAYLOAD DEBUG');
-      console.log('Instance:', instanceName);
-      console.log('QR Data:', JSON.stringify(qrData, null, 2));
-      console.log('QR Data Keys:', Object.keys(qrData || {}));
+      console.log('\n🔥 QR WEBHOOK PROCESSING');
+      // 🛡️ LOG LEVE - sem base64 pesado
+      console.log({
+        instance: instanceName,
+        hasQr: !!qrData?.qrcode,
+        pairingCode: qrData?.qrcode?.pairingCode,
+        qrLength: qrData?.qrcode?.base64?.length || 0
+      });
       console.log('========================\n');
 
       webhookLogger.info(`Processing QR code update for ${instanceName}`);
@@ -409,7 +424,7 @@ class WebhookHandler {
               store_id: storeId,
               instance_name: instanceName,
               qr_code: qrcode,
-              connection_status: 'not_created',  // 🛡️ Mudar para respeitar constraint
+              connection_status: 'connecting',  // 🛡️ CORRIGIDO: status válido para constraint
               last_activity: new Date().toISOString(),
               updated_at: new Date().toISOString()
             })
@@ -429,7 +444,7 @@ class WebhookHandler {
             .from('whatsapp_sessions')
             .update({
               qr_code: qrcode,
-              connection_status: 'not_created',  // 🛡️ Mudar para respeitar constraint
+              connection_status: 'connecting',  // 🛡️ CORRIGIDO: status válido para constraint
               last_activity: new Date().toISOString(),
               updated_at: new Date().toISOString()
             })
@@ -669,7 +684,10 @@ class WebhookHandler {
     }
     // Para QR Code, usar hash do QR
     else if (event.includes('qrcode') && data?.qrcode) {
-      dataHash = data.qrcode.substring(0, 50); // Primeiros 50 chars
+      // 🛡️ CORREÇÃO: data.qrcode agora é OBJETO, não STRING
+      // Formato novo: { pairingCode, code, base64 }
+      const qrString = data.qrcode?.base64 || data.qrcode?.code || JSON.stringify(data.qrcode);
+      dataHash = qrString ? qrString.substring(0, 50) : Date.now().toString();
     }
     // Para connection, usar timestamp ou state
     else if (event.includes('connection')) {
