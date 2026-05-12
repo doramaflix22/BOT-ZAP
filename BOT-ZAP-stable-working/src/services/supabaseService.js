@@ -43,10 +43,13 @@ class SupabaseService {
     try {
       const instanceName = `store_${storeId}`;
 
+      // 🛡️ MAPEAR STATUS PARA VALORES VÁLIDOS DA CONSTRAINT
+      const validStatus = this.mapToValidStatus(sessionData.connection_status || sessionData.status || 'disconnected');
+
       const payload = {
         store_id: storeId,
         instance_name: instanceName,
-        connection_status: sessionData.status || 'disconnected',
+        connection_status: validStatus,
         phone: sessionData.phone || null,
         profile_name: sessionData.profileName || null,
         qr_code: sessionData.qr || null,
@@ -144,8 +147,11 @@ class SupabaseService {
         additionalData
       });
 
+      // 🛡️ MAPEAR STATUS PARA VALOR VÁLIDO ANTES DE SALVAR
+      const validStatus = this.mapToValidStatus(status);
+
       const payload = {
-        connection_status: status,
+        connection_status: validStatus,
         last_activity: new Date().toISOString(),
         updated_at: new Date().toISOString(),
         ...additionalData
@@ -201,7 +207,7 @@ class SupabaseService {
         .from('whatsapp_sessions')
         .update({
           qr_code: qrCode,
-          connection_status: 'qr',
+          connection_status: 'connecting', // 🛡️ STATUS VÁLIDO - aguardando leitura do QR
           last_activity: new Date().toISOString(),
           updated_at: new Date().toISOString()
         })
@@ -424,6 +430,37 @@ class SupabaseService {
       // Em caso de erro, retornar false para não bloquear
       return false;
     }
+  }
+
+  /**
+   * 🛡️ MAPEAR STATUS PARA VALORES VÁLIDOS DA CONSTRAINT
+   * Converte status internos para valores aceitos pelo banco
+   * 
+   * @param {string} status - Status original
+   * @returns {string} Status válido para o banco
+   */
+  mapToValidStatus(status) {
+    const statusMap = {
+      // Status inválidos que causam constraint violation
+      'qr': 'connecting',        // QR disponível → aguardando conexão
+      'error': 'disconnected',   // Erro → desconectado
+      'not_created': 'disconnected', // Lock de conexão → desconectado
+      'unknown': 'disconnected', // Desconhecido → desconectado
+      
+      // Status válidos (mantém)
+      'connected': 'connected',
+      'disconnected': 'disconnected',
+      'connecting': 'connecting'
+    };
+
+    const validStatus = statusMap[status] || 'disconnected';
+    
+    console.log('🔄 STATUS MAPPING:', {
+      original: status,
+      mapped: validStatus
+    });
+    
+    return validStatus;
   }
 
   /**

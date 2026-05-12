@@ -75,7 +75,7 @@ class SessionController {
       console.log('🔒 CHECKING CONNECTION LOCK...');
       const existingSession = await this.supabaseService.getSession(storeId);
       
-      if (existingSession?.connection_status === 'qr') {
+      if (existingSession?.connection_status === 'connecting') {
         // 🛡️ TIMEOUT DA TRAVA: se estiver conectando há mais de 2 minutos, permite nova tentativa
         const lockTimeout = 2 * 60 * 1000; // 2 minutos
         const lastActivity = existingSession.last_activity ? new Date(existingSession.last_activity).getTime() : 0;
@@ -94,9 +94,9 @@ class SessionController {
         }
       }
       
-      // 🛡️ MARCAR COMO "qr" ANTES DE TUDO (respeita constraint do banco)
+      // 🛡️ MARCAR COMO "connecting" ANTES DE TUDO (respeita constraint do banco)
       console.log('🔒 SETTING CONNECTION LOCK...');
-      await this.supabaseService.updateConnectionStatus(storeId, 'qr');
+      await this.supabaseService.updateConnectionStatus(storeId, 'connecting');
       console.log('✅ CONNECTION LOCK SET');
 
       // Validar storeId
@@ -165,7 +165,7 @@ class SessionController {
             // 💾 SALVAR PHONE NO BANCO IMEDIATAMENTE APÓS CRIAÇÃO
             console.log('💾 SAVING PHONE TO DATABASE AFTER CREATION...');
             await this.supabaseService.saveSession(storeId, {
-              status: 'qr',
+              connection_status: 'connecting', // 🛡️ STATUS VÁLIDO - aguardando QR via webhook
               phone: cleanPhone
             });
             console.log('✅ PHONE SAVED TO DATABASE');
@@ -188,11 +188,11 @@ class SessionController {
             
             return {
               success: true,
-              status: 'qr',
+              status: 'connecting',
               message: 'New instance created and connected - QR will arrive via webhook',
               data: {
                 instanceName,
-                connectionStatus: 'qr'
+                connectionStatus: 'connecting'
               }
             };
           } catch (err) {
@@ -257,11 +257,11 @@ class SessionController {
             
             return {
               success: true,
-              status: 'qr',
+              status: 'connecting',
               message: 'Instance reconnected - QR will arrive via webhook',
               data: {
                 instanceName,
-                connectionStatus: 'qr',
+                connectionStatus: 'connecting',
                 phone: savedPhone // Phone salvo no banco
               }
             };
@@ -275,11 +275,11 @@ class SessionController {
         // 🛡️ QR VIRÁ VIA WEBHOOK - não chamar getQRCode manualmente
         return {
           success: true,
-          status: 'qr',
+          status: 'connecting',
           message: 'Connecting existing instance - QR will arrive via webhook',
           data: {
             instanceName,
-            connectionStatus: 'qr',
+            connectionStatus: 'connecting',
             phone: savedPhone // Phone salvo no banco
           }
         };
@@ -291,11 +291,11 @@ class SessionController {
         // 🛡️ QR VIRÁ VIA WEBHOOK - não chamar getQRCode manualmente
         return {
           success: true,
-          status: 'qr',
+          status: 'connecting',
           message: 'Attempting recovery - QR will arrive via webhook',
           data: {
             instanceName,
-            connectionStatus: 'qr'
+            connectionStatus: 'connecting'
           }
         };
       } catch (recoveryError) {
@@ -319,7 +319,7 @@ class SessionController {
       
       // 🛡️ LIBERAR LOCK EM CASO DE ERRO
       try {
-        await this.supabaseService.updateConnectionStatus(storeId, 'error');
+        await this.supabaseService.updateConnectionStatus(storeId, 'disconnected'); // 🛡️ STATUS VÁLIDO
         console.log('🔓 CONNECTION LOCK RELEASED (ERROR)');
       } catch (lockError) {
         console.error('Failed to release connection lock:', lockError);
@@ -344,7 +344,7 @@ class SessionController {
       let profileName = null;
 
       if (!connectionState) {
-        status = 'not_created';
+        status = 'disconnected'; // 🛡️ STATUS VÁLIDO
       } else if (connectionState.connected) {
         status = 'connected';
         isConnected = true;
@@ -521,7 +521,7 @@ class SessionController {
           success: true,
           data: {
             qr: qrCode,
-            status: 'qr'
+            status: 'connecting' // 🛡️ STATUS VÁLIDO
           }
         };
 

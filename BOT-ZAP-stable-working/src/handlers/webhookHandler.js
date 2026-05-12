@@ -409,7 +409,7 @@ class WebhookHandler {
               store_id: storeId,
               instance_name: instanceName,
               qr_code: qrcode,
-              connection_status: 'qr',
+              connection_status: 'not_created',  // 🛡️ Mudar para respeitar constraint
               last_activity: new Date().toISOString(),
               updated_at: new Date().toISOString()
             })
@@ -429,7 +429,7 @@ class WebhookHandler {
             .from('whatsapp_sessions')
             .update({
               qr_code: qrcode,
-              connection_status: 'qr',
+              connection_status: 'not_created',  // 🛡️ Mudar para respeitar constraint
               last_activity: new Date().toISOString(),
               updated_at: new Date().toISOString()
             })

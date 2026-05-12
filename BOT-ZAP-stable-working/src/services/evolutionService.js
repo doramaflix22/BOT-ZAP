@@ -279,7 +279,7 @@ class EvolutionService {
   mapConnectionStatus(evolutionState) {
     const statusMap = {
       'open': 'connected',
-      'connecting': 'qr',  // 🛡️ Mudar para 'qr' para respeitar constraint do banco
+      'connecting': 'connecting',  // 🛡️ STATUS VÁLIDO - aguardando QR/conexão
       'close': 'disconnected',
       'disconnecting': 'disconnected'
     };
@@ -546,6 +546,7 @@ class EvolutionService {
           } else {
             // 🛡️ PROBLEMA 3 CORRIGIDO: canCreate matematicamente fechado
             // Dupla verificação negativa → PODE CRIAR
+            finalDecision = false; // 🛡️ INSTÂNCIA NÃO EXISTE
             canCreate = true;
             source = 'dual-confirmation-not-exists';
             logger.debug(`✅ DUAL CONFIRMATION: Instance does NOT exist: ${instanceName}`);
