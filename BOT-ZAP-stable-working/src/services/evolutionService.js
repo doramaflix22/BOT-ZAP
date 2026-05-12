@@ -7,15 +7,14 @@
  * 
  * 📋 INSTÂNCIAS:
  * - GET /instance/fetchInstances → Listar todas instâncias
- * - POST /instance/create → Criar nova instância
+ * - POST /instance/create → Criar nova instância (QR gerado automaticamente)
  * - GET /instance/info/{instance} → Obter info da instância
- * - POST /instance/connect/{instance} → Conectar instância
  * - POST /instance/restart/{instance} → Reiniciar instância
  * - DELETE /instance/logout/{instance} → Logout da instância
  * - DELETE /instance/delete/{instance} → Deletar instância
  * 
  * 📋 QR CODE:
- * - GET /instance/connect/{instance} → Obter QR code
+ * - GET /instance/connect/{instance} → Obter QR code (gerado automaticamente após create)
  * 
  * 📋 WEBHOOK:
  * - POST /webhook/set/{instance} → Configurar webhook (events: ["APPLICATION_STARTUP"])
@@ -181,29 +180,24 @@ class EvolutionService {
   }
 
   /**
-   * Forçar conexão da instância
+   * Forçar conexão da instância (MÉTODO LEGADO - NÃO USAR)
+   * 🛡️ ATENÇÃO: Este endpoint não existe mais na Evolution API v2
+   * A Evolution gera QR automaticamente após createInstance()
    * 
    * @param {string} instanceName - Nome da instância
    * @returns {Promise<Object>} Resultado da conexão
    */
   async connectInstance(instanceName) {
-    try {
-      logger.info(`Forcing connection for instance: ${instanceName}`);
-
-      const response = await this.client.post(`/instance/connect/${instanceName}`);
-
-      logger.info(`Connection initiated successfully for: ${instanceName}`);
-
-      return {
-        success: true,
-        instanceName,
-        data: response.data
-      };
-
-    } catch (error) {
-      logger.error(`Failed to connect instance ${instanceName}:`, error);
-      throw new Error(`Evolution API Error: ${error.response?.data?.message || error.message}`);
-    }
+    logger.warn(`⚠️ LEGACY METHOD CALLED: connectInstance() - Endpoint não existe mais na Evolution API v2`);
+    logger.warn(`⚠️ QR será gerado automaticamente via webhook após createInstance()`);
+    
+    // 🛡️ NÃO FAZ NADA - Evolution API v2 não tem este endpoint
+    return {
+      success: true,
+      instanceName,
+      message: 'QR will arrive via webhook automatically',
+      data: null
+    };
   }
 
   /**

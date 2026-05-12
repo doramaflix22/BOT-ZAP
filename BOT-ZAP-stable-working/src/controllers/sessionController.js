@@ -170,12 +170,10 @@ class SessionController {
             });
             console.log('✅ PHONE SAVED TO DATABASE');
 
-            // 🔥 FORÇAR CONEXÃO (crítico para QR confiável)
-            console.log('🔌 FORCING CONNECTION...');
-            await this.evolutionService.connectInstance(instanceName);
-            console.log('✅ CONNECTION INITIATED');
-
-            // �️ QR VIRÁ VIA WEBHOOK - não chamar getQRCode manualmente
+            // �️ EVOLUTION API v2 GERA QR AUTOMATICAMENTE
+            // Não precisa mais chamar connectInstance - endpoint não existe mais
+            console.log('🔌 QR WILL ARRIVE VIA WEBHOOK (automatic)');
+            console.log('✅ INSTANCE CREATED - waiting for webhook');
             
             const connectEnd = Date.now();
             const duration = connectEnd - connectStart;
@@ -249,11 +247,9 @@ class SessionController {
           console.log('♻️ Instance exists but is disconnected → forcing reconnect');
           
           try {
-            // Forçar reconexão (usa phone da instância, não do frontend)
-            await this.evolutionService.connectInstance(instanceName);
-            console.log('✅ RECONNECTION INITIATED');
-            
-            // 🛡️ QR VIRÁ VIA WEBHOOK - não chamar getQRCode manualmente
+            // 🛡️ EVOLUTION API v2 GERA QR AUTOMATICAMENTE
+            // Não precisa mais chamar connectInstance - endpoint não existe mais
+            console.log('🔌 RECONNECTING - QR will arrive via webhook');
             
             return {
               success: true,
@@ -404,7 +400,7 @@ class SessionController {
           success: true,
           data: {
             connected: false,
-            status: 'not_found',
+            status: 'disconnected',  // 🛡️ CORRIGIDO: status válido em vez de 'not_found'
             phone: null,
             profileName: null,
             qr: null
