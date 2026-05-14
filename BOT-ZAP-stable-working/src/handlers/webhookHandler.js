@@ -299,7 +299,7 @@ class WebhookHandler {
               updated_at: new Date().toISOString(),
               ...additionalData
             })
-            .eq('instance_name', instanceName)
+            .eq('store_id', storeId)
             .select()
             .maybeSingle();
 
@@ -418,7 +418,7 @@ class WebhookHandler {
         const { data: existingSession, error: checkError } = await this.supabaseService.client
           .from('whatsapp_sessions')
           .select('store_id')
-          .eq('instance_name', instanceName)
+          .eq('store_id', storeId)
           .maybeSingle();
 
         if (checkError) {
@@ -461,7 +461,7 @@ class WebhookHandler {
               last_activity: new Date().toISOString(),
               updated_at: new Date().toISOString()
             })
-            .eq('instance_name', instanceName)
+            .eq('store_id', storeId)
             .select()
             .maybeSingle();
 
