@@ -157,8 +157,9 @@ class SupabaseService {
         ...additionalData
       };
 
-      // 🛡️ SÓ LIMPAR QR quando realmente conectar (não em 'qr')
-      if (status === 'connected') {
+      // 🛡️ LIMPAR QR em todos os estados que não precisam de QR
+      // Isso previne QR morto no banco causando polling infinito
+      if (status === 'connected' || status === 'disconnected') {
         payload.qr_code = null;
       }
       
@@ -173,10 +174,14 @@ class SupabaseService {
         qrLength: payload.qr_code?.length || 0
       });
 
+      // 🛡️ USAR UPSERT EM VEZ DE UPDATE PARA EVITAR FALHA SE SESSÃO NÃO EXISTE
+      // Webhook pode chegar antes da sessão ser criada manualmente
       const { data, error } = await this.client
         .from('whatsapp_sessions')
-        .update(payload)
-        .eq('store_id', storeId)
+        .upsert(payload, {
+          onConflict: 'store_id',
+          returning: 'representation'
+        })
         .select()
         .maybeSingle();
 

@@ -71,18 +71,28 @@ class SessionController {
 
       controllerLogger.info(`Starting WhatsApp connection for store: ${storeId}`);
 
-      // 🛡️ TRAVA ANTI-DUPLICAÇÃO COM TIMEOUT - Verificar se já está conectando
+      // 🛡️ TRAVA ANTI-DUPLICAÇÃO MELHORADA - Verificação mais robusta
       console.log('🔒 CHECKING CONNECTION LOCK...');
       const existingSession = await this.supabaseService.getSession(storeId);
-      
-      if (existingSession?.connection_status === 'connecting') {
-        // 🛡️ TIMEOUT DA TRAVA: se estiver conectando há mais de 2 minutos, permite nova tentativa
-        const lockTimeout = 2 * 60 * 1000; // 2 minutos
-        const lastActivity = existingSession.last_activity ? new Date(existingSession.last_activity).getTime() : 0;
-        const lockAge = Date.now() - lastActivity;
-        
+
+      // 🛡️ VERIFICAÇÃO MULTICAMADA: status + QR + atividade recente
+      const isConnecting = existingSession?.connection_status === 'connecting';
+      const hasRecentQR = existingSession?.qr_code && existingSession.last_activity;
+      const lastActivity = existingSession?.last_activity ? new Date(existingSession.last_activity).getTime() : 0;
+      const lockAge = Date.now() - lastActivity;
+      const lockTimeout = 2 * 60 * 1000; // 2 minutos
+
+      // 🛡️ BLOQUEAR SE: estiver conectando E (tiver QR recente OU atividade muito recente)
+      if (isConnecting && (hasRecentQR || lockAge < 30000)) {
+        // Se tiver QR ou atividade nos últimos 30s, bloquear
         if (lockAge < lockTimeout) {
-          console.log('⚠️ CONNECTION ALREADY IN PROGRESS - ABORTING (lock age:', lockAge, 'ms)');
+          console.log('⚠️ CONNECTION ALREADY IN PROGRESS - ABORTING');
+          console.log('Lock details:', {
+            status: existingSession.connection_status,
+            hasQR: !!existingSession.qr_code,
+            lockAge: lockAge,
+            lockTimeout: lockTimeout
+          });
           return {
             success: false,
             message: 'Connection already in progress',
@@ -90,7 +100,7 @@ class SessionController {
             lockAge: lockAge
           };
         } else {
-          console.log('⚠️ CONNECTION LOCK EXPIRED (lock age:', lockAge, 'ms) - PROCEEDING WITH NEW CONNECTION');
+          console.log('⚠️ CONNECTION LOCK EXPIRED (lock age:', lockAge, 'ms) - PROCEEDING');
         }
       }
       
@@ -135,11 +145,7 @@ class SessionController {
         }
       }
 
-      // 🔄 SINCRONIZAR BANCO COM REALIDADE
-      console.log('🔄 STEP 3 - SYNCING DATABASE WITH REALITY');
-      await this.syncDatabaseWithEvolution(storeId, instanceName, connectionState);
-
-      // 🔴 CASO 1: NÃO EXISTE (SÓ CRIA SE canCreate = true)
+      //  CASO 1: NÃO EXISTE (SÓ CRIA SE canCreate = true)
       if (!existenceResult.exists) {
         // 🛡️ REGRA OBRIGATÓRIA: Só criar se canCreate for true
         if (existenceResult.canCreate) {
@@ -414,14 +420,17 @@ class SessionController {
           const instanceName = `store_${storeId}`;
           const evolutionStatus = await this.evolutionService.getConnectionState(instanceName);
 
+          // 🛡️ MAPEAR STATUS EVOLUTION PARA STATUS DO BANCO antes de comparar
+          const mappedEvolutionStatus = this.evolutionService.mapConnectionStatus(evolutionStatus.rawState);
+
           // Se status divergir, atualizar banco
-          if (evolutionStatus.status !== session.connection_status) {
+          if (mappedEvolutionStatus !== session.connection_status) {
             await this.supabaseService.updateConnectionStatus(
               storeId,
-              evolutionStatus.status
+              mappedEvolutionStatus
             );
 
-            session.connection_status = evolutionStatus.status;
+            session.connection_status = mappedEvolutionStatus;
           }
         } catch (error) {
           controllerLogger.warn(`Failed to verify Evolution status for store ${storeId}:`, error);
@@ -492,17 +501,35 @@ class SessionController {
         };
       }
 
-      // Se tiver QR no banco, retornar
+      // Se tiver QR no banco, SÓ RETORNAR se status for 'connecting'
+      // Isso previne QR morto sendo retornado quando desconectado
       if (session.qr_code) {
         console.log('✅ QR FOUND IN DATABASE');
         console.log('QR Length:', session.qr_code.length);
-        return {
-          success: true,
-          data: {
-            qr: session.qr_code,
-            status: session.connection_status
-          }
-        };
+        console.log('Connection Status:', session.connection_status);
+
+        // 🛡️ SÓ RETORNAR QR SE ESTIVER EM ESTADO DE CONEXÃO VÁLIDO
+        if (session.connection_status === 'connecting') {
+          return {
+            success: true,
+            data: {
+              qr: session.qr_code,
+              status: session.connection_status
+            }
+          };
+        } else {
+          // 🛡️ QR EXISTE MAS STATUS NÃO É VÁLIDO - LIMPAR E NÃO RETORNAR
+          console.log('⚠️ QR EXISTS BUT STATUS IS NOT CONNECTING - CLEARING QR');
+          await this.supabaseService.clearQRCode(storeId);
+          return {
+            success: true,
+            data: {
+              qr: null,
+              status: session.connection_status,
+              message: 'QR expired - wait for new QR via webhook'
+            }
+          };
+        }
       }
 
       return {
@@ -607,7 +634,7 @@ class SessionController {
 
   /**
    * Reconectar sessão
-   * 
+   *
    * @param {string} storeId - ID do restaurante
    * @returns {Promise<Object>} Resultado da reconexão
    */
@@ -615,14 +642,22 @@ class SessionController {
     try {
       controllerLogger.info(`Reconnecting WhatsApp for store: ${storeId}`);
 
+      // 🛡️ OBTER PHONE SALVO NO BANCO (obrigatório para connect)
+      const session = await this.supabaseService.getSession(storeId);
+      const savedPhone = session?.phone;
+
+      if (!savedPhone) {
+        throw new Error('Phone number not found in database - cannot reconnect');
+      }
+
       // Primeiro desconectar
       await this.disconnect(storeId);
 
       // Aguardar um pouco
       await new Promise(resolve => setTimeout(resolve, 2000));
 
-      // Conectar novamente
-      return await this.connect(storeId);
+      // Conectar novamente com phone salvo
+      return await this.connect(storeId, savedPhone);
 
     } catch (error) {
       controllerLogger.error(`Failed to reconnect WhatsApp for store ${storeId}:`, error);
