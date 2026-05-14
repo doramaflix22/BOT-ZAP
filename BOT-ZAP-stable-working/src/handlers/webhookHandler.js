@@ -252,67 +252,14 @@ class WebhookHandler {
       console.log('Additional Data:', additionalData);
       
       try {
-        // 🛡️ VERIFICAR SE SESSÃO EXISTE ANTES DE ATUALIZAR
-        const { data: existingSession, error: checkError } = await this.supabaseService.client
-          .from('whatsapp_sessions')
-          .select('store_id')
-          .eq('instance_name', instanceName)
-          .maybeSingle();
+        // 🛡️ FIX RACE CONDITION: Use UPSERT instead of SELECT+INSERT
+        // This prevents duplicate key errors when multiple webhooks arrive simultaneously
+        const result = await this.supabaseService.updateConnectionStatus(storeId, mappedStatus, {
+          instance_name: instanceName,
+          ...additionalData
+        });
 
-        if (checkError) {
-          console.error('❌ ERROR CHECKING SESSION:', checkError);
-          throw checkError;
-        }
-
-        let result;
-        
-        if (!existingSession) {
-          // 🛡️ SESSÃO NÃO EXISTE - CRIAR PRIMEIRO
-          console.log('⚠️ SESSION NOT FOUND - CREATING NEW SESSION');
-          const { data: newSession, error: insertError } = await this.supabaseService.client
-            .from('whatsapp_sessions')
-            .insert({
-              store_id: storeId,
-              instance_name: instanceName,
-              connection_status: mappedStatus,
-              last_activity: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-              ...additionalData
-            })
-            .select()
-            .single();
-
-          if (insertError) {
-            console.error('❌ FAILED TO CREATE SESSION:', insertError);
-            throw insertError;
-          }
-
-          result = newSession;
-          console.log('✅ NEW SESSION CREATED:', result);
-        } else {
-          // 🛡️ SESSÃO EXISTE - ATUALIZAR
-          const { data: updatedSession, error: updateError } = await this.supabaseService.client
-            .from('whatsapp_sessions')
-            .update({
-              connection_status: mappedStatus,
-              last_activity: new Date().toISOString(),
-              updated_at: new Date().toISOString(),
-              ...additionalData
-            })
-            .eq('store_id', storeId)
-            .select()
-            .maybeSingle();
-
-          if (updateError) {
-            console.error('❌ FAILED TO UPDATE SESSION:', updateError);
-            throw updateError;
-          }
-
-          result = updatedSession;
-          console.log('✅ SESSION UPDATED:', result);
-        }
-
-        console.log('✅ CONNECTION UPDATE SAVED SUCCESSFULLY');
+        console.log('✅ CONNECTION UPDATE SAVED SUCCESSFULLY (UPSERT)');
         console.log('Result Session:', result);
 
       } catch (saveError) {
@@ -390,14 +337,6 @@ class WebhookHandler {
         return { success: false, reason: 'Duplicate QR code ignored' };
       }
       
-      // Salvar string base64 no cache (não objeto)
-      this.lastQrByInstance.set(instanceName, qrString);
-      
-      // Log com pairingCode para debug
-      if (pairingCode) {
-        console.log(`🔑 Pairing Code: ${pairingCode}`);
-      }
-      
       // 🛡️ VALIDAÇÃO CRÍTICA - QR pode ser null
       if (!qrcode) {
         console.log('❌ NO QR CODE FOUND IN PAYLOAD - IGNORING');
@@ -405,8 +344,14 @@ class WebhookHandler {
         return { success: false, reason: 'No QR code in payload' };
       }
       
-      // Atualizar cache
-      this.lastQrByInstance.set(instanceName, qrcode);
+      // 🛡️ FIX: Salvar string base64 no cache APENAS UMA VEZ (não objeto)
+      // Isso previne inconsistência na comparação de duplicados
+      this.lastQrByInstance.set(instanceName, qrString);
+      
+      // Log com pairingCode para debug
+      if (pairingCode) {
+        console.log(`🔑 Pairing Code: ${pairingCode}`);
+      }
       
       // 🛡️ SALVAR QR DIRETAMENTE USANDO instance_name
       console.log('💾 SAVING QR TO DATABASE...');
@@ -414,67 +359,14 @@ class WebhookHandler {
       console.log('QR Length:', qrcode?.length || 0);
       
       try {
-        // 🛡️ VERIFICAR SE SESSÃO EXISTE ANTES DE ATUALIZAR
-        const { data: existingSession, error: checkError } = await this.supabaseService.client
-          .from('whatsapp_sessions')
-          .select('store_id')
-          .eq('store_id', storeId)
-          .maybeSingle();
+        // 🛡️ FIX RACE CONDITION: Use UPSERT instead of SELECT+INSERT
+        // This prevents duplicate key errors when multiple webhooks arrive simultaneously
+        const result = await this.supabaseService.updateConnectionStatus(storeId, 'connecting', {
+          instance_name: instanceName,
+          qr_code: qrcode
+        });
 
-        if (checkError) {
-          console.error('❌ ERROR CHECKING SESSION:', checkError);
-          throw checkError;
-        }
-
-        let result;
-        
-        if (!existingSession) {
-          // 🛡️ SESSÃO NÃO EXISTE - CRIAR PRIMEIRO
-          console.log('⚠️ SESSION NOT FOUND - CREATING NEW SESSION');
-          const { data: newSession, error: insertError } = await this.supabaseService.client
-            .from('whatsapp_sessions')
-            .insert({
-              store_id: storeId,
-              instance_name: instanceName,
-              qr_code: qrcode,
-              connection_status: 'connecting',  // 🛡️ CORRIGIDO: status válido para constraint
-              last_activity: new Date().toISOString(),
-              updated_at: new Date().toISOString()
-            })
-            .select()
-            .single();
-
-          if (insertError) {
-            console.error('❌ FAILED TO CREATE SESSION:', insertError);
-            throw insertError;
-          }
-
-          result = newSession;
-          console.log('✅ NEW SESSION CREATED:', result);
-        } else {
-          // 🛡️ SESSÃO EXISTE - ATUALIZAR
-          const { data: updatedSession, error: updateError } = await this.supabaseService.client
-            .from('whatsapp_sessions')
-            .update({
-              qr_code: qrcode,
-              connection_status: 'connecting',  // 🛡️ CORRIGIDO: status válido para constraint
-              last_activity: new Date().toISOString(),
-              updated_at: new Date().toISOString()
-            })
-            .eq('store_id', storeId)
-            .select()
-            .maybeSingle();
-
-          if (updateError) {
-            console.error('❌ FAILED TO UPDATE SESSION:', updateError);
-            throw updateError;
-          }
-
-          result = updatedSession;
-          console.log('✅ SESSION UPDATED:', result);
-        }
-
-        console.log('✅ QR SAVED SUCCESSFULLY');
+        console.log('✅ QR SAVED SUCCESSFULLY (UPSERT)');
         console.log('Result Session:', result);
 
       } catch (saveError) {
@@ -621,14 +513,14 @@ class WebhookHandler {
   mapConnectionStatus(evolutionState) {
     const statusMap = {
       'open': 'connected',
-      'connecting': 'qr',  // 🛡️ Mudar para 'qr' para respeitar constraint do banco
+      'connecting': 'connecting',  // 🛡️ FIX: 'connecting' should map to 'connecting', not 'qr'
       'close': 'disconnected',
       'disconnecting': 'disconnected',
-      'refused': 'error',
-      'timeout': 'error'
+      'refused': 'disconnected',  // 🛡️ FIX: Map refused to disconnected (valid status)
+      'timeout': 'disconnected'     // 🛡️ FIX: Map timeout to disconnected (valid status)
     };
 
-    return statusMap[evolutionState] || 'unknown';
+    return statusMap[evolutionState] || 'disconnected';  // 🛡️ FIX: Default to disconnected (valid status)
   }
 
   /**
@@ -695,20 +587,37 @@ class WebhookHandler {
     if (event.includes('message') && data?.key?.id) {
       dataHash = data.key.id;
     }
-    // Para QR Code, usar hash do QR
+    // Para QR Code, usar hash do QR (pairingCode ou base64)
     else if (event.includes('qrcode') && data?.qrcode) {
-      // 🛡️ CORREÇÃO: data.qrcode agora é OBJETO, não STRING
-      // Formato novo: { pairingCode, code, base64 }
-      const qrString = data.qrcode?.base64 || data.qrcode?.code || JSON.stringify(data.qrcode);
-      dataHash = qrString ? qrString.substring(0, 50) : Date.now().toString();
+      // 🛡️ FIX: Use pairingCode for stable deduplication, fallback to base64 hash
+      // pairingCode is stable across QR updates for the same session
+      const pairingCode = data.qrcode?.pairingCode;
+      const qrBase64 = data.qrcode?.base64 || data.qrcode?.code;
+      
+      if (pairingCode) {
+        dataHash = `pairing:${pairingCode}`;
+      } else if (qrBase64) {
+        // Use first 50 chars of base64 as hash
+        dataHash = `base64:${qrBase64.substring(0, 50)}`;
+      } else {
+        // Last resort: use object structure hash
+        dataHash = `obj:${JSON.stringify(data.qrcode).substring(0, 50)}`;
+      }
     }
-    // Para connection, usar timestamp ou state
+    // Para connection, usar state + user info (se disponível) para deduplicação estável
     else if (event.includes('connection')) {
-      dataHash = data?.state || Date.now().toString();
+      const state = data?.state || 'unknown';
+      const userId = data?.user?.id || 'no-user';
+      // 🛡️ FIX: Use state + user ID instead of Date.now() for stable deduplication
+      // This prevents duplicate connection events from being processed
+      dataHash = `${state}:${userId}`;
     }
-    // Para outros, usar timestamp atual
+    // Para outros eventos, usar hash estável dos dados
     else {
-      dataHash = Date.now().toString();
+      // 🛡️ FIX: Use hash of data content instead of Date.now()
+      // This ensures same data produces same key
+      const dataStr = JSON.stringify(data || {}).substring(0, 100);
+      dataHash = `data:${dataStr}`;
     }
     
     return `${event}:${instance}:${dataHash}`;
