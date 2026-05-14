@@ -151,6 +151,7 @@ class SupabaseService {
       const validStatus = this.mapToValidStatus(status);
 
       const payload = {
+        store_id: storeId,  // 🛡️ CRÍTICO: store_id OBRIGATÓRIO para upsert funcionar
         connection_status: validStatus,
         last_activity: new Date().toISOString(),
         updated_at: new Date().toISOString(),
