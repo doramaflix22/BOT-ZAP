@@ -33,6 +33,43 @@ class SupabaseService {
   }
 
   /**
+   * Criar nova sessão WhatsApp (usado apenas no connect inicial)
+   * 
+   * @param {string} storeId - ID do restaurante
+   * @param {string} instanceName - Nome da instância
+   * @returns {Promise<Object>} Sessão criada
+   */
+  async createSession(storeId, instanceName) {
+    try {
+      const payload = {
+        store_id: storeId,
+        instance_name: instanceName,
+        connection_status: 'connecting',
+        last_activity: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
+
+      const { data, error } = await this.client
+        .from('whatsapp_sessions')
+        .insert(payload)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      supabaseLogger.info(`Session created for store ${storeId}`, {
+        instanceName,
+        status: 'connecting'
+      });
+
+      return data;
+    } catch (error) {
+      supabaseLogger.error(`Failed to create session for store ${storeId}:`, error);
+      throw error;
+    }
+  }
+
+  /**
    * Salvar/atualizar sessão WhatsApp
    * 
    * @param {string} storeId - ID do restaurante
@@ -132,6 +169,7 @@ class SupabaseService {
 
   /**
    * Atualizar status da conexão
+   * 🛡️ FIX: Usa UPDATE em vez de UPSERT para não sobrescrever campos não relacionados
    * 
    * @param {string} storeId - ID do restaurante
    * @param {string} status - Novo status
@@ -151,7 +189,6 @@ class SupabaseService {
       const validStatus = this.mapToValidStatus(status);
 
       const payload = {
-        store_id: storeId,  // 🛡️ CRÍTICO: store_id OBRIGATÓRIO para upsert funcionar
         connection_status: validStatus,
         last_activity: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -175,14 +212,12 @@ class SupabaseService {
         qrLength: payload.qr_code?.length || 0
       });
 
-      // 🛡️ USAR UPSERT EM VEZ DE UPDATE PARA EVITAR FALHA SE SESSÃO NÃO EXISTE
-      // Webhook pode chegar antes da sessão ser criada manualmente
+      // 🛡️ FIX: Usar UPDATE em vez de UPSERT para não sobrescrever campos não relacionados
+      // Webhooks só devem atualizar campos específicos, não a linha inteira
       const { data, error } = await this.client
         .from('whatsapp_sessions')
-        .upsert(payload, {
-          onConflict: 'store_id',
-          returning: 'representation'
-        })
+        .update(payload)
+        .eq('store_id', storeId)
         .select()
         .maybeSingle();
 

@@ -18,10 +18,11 @@ class WebhookHandler {
     // Set para deduplicação de webhooks
     this.processedWebhooks = new Set();
     
-    // Limpar cache periodicamente (30 segundos)
+    // 🛡️ FIX: Limpar cache periodicamente (5 minutos em vez de 30 segundos)
+    // Evolution API reenvia webhooks após 30s, quebrando deduplicação
     setInterval(() => {
       this.processedWebhooks.clear();
-    }, 30000);
+    }, 5 * 60 * 1000); // 5 minutos
   }
 
   /**
@@ -221,12 +222,16 @@ class WebhookHandler {
         return { success: false, reason: 'Invalid instance format' };
       }
 
-      // Preparar dados adicionais para salvar
-      const additionalData = {};
+      // 🛡️ FIX: Preparar dados específicos para UPDATE (não sobrescrever qr_code desnecessariamente)
+      const updateFields = {
+        connection_status: mappedStatus,
+        last_activity: new Date().toISOString(),
+        updated_at: new Date().toISOString()
+      };
       
       if (state === 'open') {
         // Conexão aberta - limpar QR e salvar informações do usuário
-        additionalData.qr_code = null;
+        updateFields.qr_code = null;
         
         console.log('🔍 CONNECTION UPDATE USER DATA:', JSON.stringify(connectionData.user, null, 2));
         
@@ -234,8 +239,8 @@ class WebhookHandler {
           const phone = connectionData.user.id?.replace('@s.whatsapp.net', '') || null;
           const profileName = connectionData.user.name || null;
           
-          additionalData.phone = phone;
-          additionalData.profile_name = profileName;
+          updateFields.phone = phone;
+          updateFields.profile_name = profileName;
           
           console.log('🎯 EXTRACTED USER INFO:', {
             phone,
@@ -245,22 +250,29 @@ class WebhookHandler {
         }
       }
 
-      // 🛡️ SALVAR PHONE DIRETAMENTE NO BANCO
+      // 🛡️ SALVAR CONNECTION UPDATE NO BANCO
       console.log('💾 SAVING CONNECTION UPDATE TO DATABASE...');
       console.log('Instance:', instanceName);
       console.log('Status:', mappedStatus);
-      console.log('Additional Data:', additionalData);
+      console.log('Update Fields:', Object.keys(updateFields));
       
       try {
-        // 🛡️ FIX RACE CONDITION: Use UPSERT instead of SELECT+INSERT
-        // This prevents duplicate key errors when multiple webhooks arrive simultaneously
-        const result = await this.supabaseService.updateConnectionStatus(storeId, mappedStatus, {
-          instance_name: instanceName,
-          ...additionalData
-        });
+        // 🛡️ FIX: Use UPDATE with specific fields only
+        // This prevents overwriting qr_code and other fields that shouldn't be touched by connection updates
+        const result = await this.supabaseService.client
+          .from('whatsapp_sessions')
+          .update(updateFields)
+          .eq('store_id', storeId)
+          .select()
+          .maybeSingle();
 
-        console.log('✅ CONNECTION UPDATE SAVED SUCCESSFULLY (UPSERT)');
-        console.log('Result Session:', result);
+        if (result.error) {
+          console.error('❌ FAILED TO UPDATE CONNECTION:', result.error);
+          throw result.error;
+        }
+
+        console.log('✅ CONNECTION UPDATE SAVED SUCCESSFULLY (UPDATE)');
+        console.log('Result Session:', result.data);
 
       } catch (saveError) {
         console.error('💥 CONNECTION UPDATE SAVE ERROR:', saveError);
@@ -326,6 +338,15 @@ class WebhookHandler {
       console.log('QR Type:', typeof qrcode);
       console.log('QR Length:', qrcode?.length || 0);
       
+      // 🛡️ FIX: Verificar se já existe QR ativo no banco antes de salvar novo
+      const existingSession = await this.supabaseService.getSession(storeId);
+      
+      if (existingSession?.qr_code && existingSession.connection_status === 'connecting') {
+        console.log('🔄 QR already exists in database, ignoring new one');
+        webhookLogger.debug(`QR already exists for ${storeId}, ignoring duplicate`);
+        return { success: false, reason: 'QR already exists' };
+      }
+      
       // 🛡️ VERIFICAR DUPLICAÇÃO POR BASE64 E PAIRING CODE
       const qrString = qrData?.qrcode?.base64 || qrData?.qrcode?.code || JSON.stringify(qrData?.qrcode);
       const pairingCode = qrData?.qrcode?.pairingCode;
@@ -359,15 +380,27 @@ class WebhookHandler {
       console.log('QR Length:', qrcode?.length || 0);
       
       try {
-        // 🛡️ FIX RACE CONDITION: Use UPSERT instead of SELECT+INSERT
-        // This prevents duplicate key errors when multiple webhooks arrive simultaneously
-        const result = await this.supabaseService.updateConnectionStatus(storeId, 'connecting', {
-          instance_name: instanceName,
-          qr_code: qrcode
-        });
+        // 🛡️ FIX: Use UPDATE instead of UPSERT to only update QR field
+        // This prevents overwriting other fields like phone, connection_status, etc.
+        const result = await this.supabaseService.client
+          .from('whatsapp_sessions')
+          .update({
+            qr_code: qrcode,
+            connection_status: 'connecting',
+            last_activity: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          })
+          .eq('store_id', storeId)
+          .select()
+          .maybeSingle();
 
-        console.log('✅ QR SAVED SUCCESSFULLY (UPSERT)');
-        console.log('Result Session:', result);
+        if (result.error) {
+          console.error('❌ FAILED TO UPDATE QR:', result.error);
+          throw result.error;
+        }
+
+        console.log('✅ QR SAVED SUCCESSFULLY (UPDATE)');
+        console.log('Result Session:', result.data);
 
       } catch (saveError) {
         console.error('💥 QR SAVE ERROR:', saveError);

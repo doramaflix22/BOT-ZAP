@@ -168,13 +168,11 @@ class SessionController {
               throw new Error('Failed to create Evolution instance');
             }
 
-            // 💾 SALVAR PHONE NO BANCO IMEDIATAMENTE APÓS CRIAÇÃO
-            console.log('💾 SAVING PHONE TO DATABASE AFTER CREATION...');
-            await this.supabaseService.saveSession(storeId, {
-              connection_status: 'connecting', // 🛡️ STATUS VÁLIDO - aguardando QR via webhook
-              phone: cleanPhone
-            });
-            console.log('✅ PHONE SAVED TO DATABASE');
+            // 💾 CRIAR SESSÃO NO BANCO IMEDIATAMENTE APÓS CRIAÇÃO
+            // 🛡️ FIX: Usar createSession em vez de saveSession para criar sessão apenas uma vez
+            console.log('💾 CREATING SESSION IN DATABASE AFTER CREATION...');
+            await this.supabaseService.createSession(storeId, instanceName);
+            console.log('✅ SESSION CREATED IN DATABASE');
 
             // �️ EVOLUTION API v2 GERA QR AUTOMATICAMENTE
             // Não precisa mais chamar connectInstance - endpoint não existe mais
