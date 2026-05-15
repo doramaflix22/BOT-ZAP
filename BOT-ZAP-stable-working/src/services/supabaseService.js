@@ -34,6 +34,8 @@ class SupabaseService {
 
   /**
    * Criar nova sessão WhatsApp (usado apenas no connect inicial)
+   * 🛡️ FIX: Usa UPSERT em vez de INSERT para evitar duplicate key error
+   * Payload é controlado e não sobrescreve campos críticos como phone ou qr_code
    * 
    * @param {string} storeId - ID do restaurante
    * @param {string} instanceName - Nome da instância
@@ -51,7 +53,9 @@ class SupabaseService {
 
       const { data, error } = await this.client
         .from('whatsapp_sessions')
-        .insert(payload)
+        .upsert(payload, {
+          onConflict: 'store_id'
+        })
         .select()
         .single();
 
