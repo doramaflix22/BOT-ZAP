@@ -131,7 +131,7 @@ class EvolutionService {
         // 🛡️ OBRIGATÓRIO: Webhook configurado na criação para não perder eventos
         webhook: {
           url: this.webhookURL,
-          byEvents: true,
+          byEvents: false,
           base64: true,
           headers: {
             authorization: `Bearer ${this.apiKey}`,
@@ -363,7 +363,7 @@ class EvolutionService {
       const payload = {
         enabled: true,
         url: this.webhookURL,
-        webhookByEvents: true,
+        webhookByEvents: false,
         webhookBase64: true,
         events: [
           "APPLICATION_STARTUP"  // 🛡️ EXATAMENTE como na documentação da API
