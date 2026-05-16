@@ -18,11 +18,8 @@ class WebhookHandler {
     // Set para deduplicação de webhooks
     this.processedWebhooks = new Set();
     
-    // 🛡️ FIX: Limpar cache periodicamente (5 minutos em vez de 30 segundos)
-    // Evolution API reenvia webhooks após 30s, quebrando deduplicação
-    setInterval(() => {
-      this.processedWebhooks.clear();
-    }, 5 * 60 * 1000); // 5 minutos
+    // 🛡️ REMOVIDO: Não limpar cache periodicamente
+    // Isso causava reprocessamento de webhooks antigos e QR duplicados
   }
 
   /**
@@ -44,6 +41,12 @@ class WebhookHandler {
       console.log('========================\n');
 
       const { event, instance, data } = webhookData;
+
+      // 🛡️ IGNORAR historySyncNotification (payloads gigantes inúteis)
+      if (data?.historySyncNotification) {
+        webhookLogger.debug(`Ignoring historySyncNotification for ${instance}`);
+        return { success: true, ignored: true, reason: 'historySyncNotification ignored' };
+      }
 
       console.log('🎯 EXTRACTED VALUES:');
       console.log('Event:', event);
@@ -233,6 +236,9 @@ class WebhookHandler {
         // Conexão aberta - limpar QR e salvar informações do usuário
         updateFields.qr_code = null;
         
+        // 🛡️ LIMPAR CACHE DE QR quando conectar
+        this.lastQrByInstance.delete(instanceName);
+        
         console.log('🔍 CONNECTION UPDATE USER DATA:', JSON.stringify(connectionData.user, null, 2));
         
         if (connectionData.user) {
@@ -338,18 +344,12 @@ class WebhookHandler {
       console.log('QR Type:', typeof qrcode);
       console.log('QR Length:', qrcode?.length || 0);
       
-      // 🛡️ FIX: Verificar se já existe QR ativo no banco antes de salvar novo
-      const existingSession = await this.supabaseService.getSession(storeId);
+      // 🛡️ REMOVIDO: Não bloquear QR updates legítimos
+      // QR novo deve sempre sobrescrever o antigo (reconexões, expiração, etc)
       
-      if (existingSession?.qr_code && existingSession.connection_status === 'connecting') {
-        console.log('🔄 QR already exists in database, ignoring new one');
-        webhookLogger.debug(`QR already exists for ${storeId}, ignoring duplicate`);
-        return { success: false, reason: 'QR already exists' };
-      }
-      
-      // 🛡️ VERIFICAR DUPLICAÇÃO POR BASE64 E PAIRING CODE
+      // 🛡️ VERIFICAR DUPLICAÇÃO POR HASH DO BASE64 (não pairingCode)
+      // pairingCode pode repetir em reconnects, base64 é mais confiável
       const qrString = qrData?.qrcode?.base64 || qrData?.qrcode?.code || JSON.stringify(qrData?.qrcode);
-      const pairingCode = qrData?.qrcode?.pairingCode;
       const lastQr = this.lastQrByInstance.get(instanceName);
       
       // Verificar por base64 (string)
@@ -563,7 +563,8 @@ class WebhookHandler {
    * @returns {string|null} Store ID
    */
   extractStoreIdFromInstance(instanceName) {
-    const match = instanceName.match(/^store_(.+)$/);
+    // 🛡️ Regex mais robusto: case insensitive, trim espaços, aceita variações
+    const match = instanceName?.trim()?.toLowerCase()?.match(/^store_(.+)$/);
     return match ? match[1] : null;
   }
 
@@ -620,16 +621,12 @@ class WebhookHandler {
     if (event.includes('message') && data?.key?.id) {
       dataHash = data.key.id;
     }
-    // Para QR Code, usar hash do QR (pairingCode ou base64)
-    else if (event.includes('qrcode') && data?.qrcode) {
-      // 🛡️ FIX: Use pairingCode for stable deduplication, fallback to base64 hash
-      // pairingCode is stable across QR updates for the same session
-      const pairingCode = data.qrcode?.pairingCode;
+    // Para QR Code, usar hash do base64 (não pairingCode - pode repetir em reconnects)
+    else if (event.toLowerCase().includes('qrcode') && data?.qrcode) {
+      // 🛡️ CORREÇÃO: Usar apenas base64 para dedupe (pairingCode repete em reconnects)
       const qrBase64 = data.qrcode?.base64 || data.qrcode?.code;
       
-      if (pairingCode) {
-        dataHash = `pairing:${pairingCode}`;
-      } else if (qrBase64) {
+      if (qrBase64) {
         // Use first 50 chars of base64 as hash
         dataHash = `base64:${qrBase64.substring(0, 50)}`;
       } else {
@@ -638,7 +635,7 @@ class WebhookHandler {
       }
     }
     // Para connection, usar state + user info (se disponível) para deduplicação estável
-    else if (event.includes('connection')) {
+    else if (event.toLowerCase().includes('connection')) {
       const state = data?.state || 'unknown';
       const userId = data?.user?.id || 'no-user';
       // 🛡️ FIX: Use state + user ID instead of Date.now() for stable deduplication

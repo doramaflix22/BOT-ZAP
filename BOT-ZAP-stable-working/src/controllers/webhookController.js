@@ -3,12 +3,14 @@
  * Gerencia recebimento e processamento de webhooks da Evolution API
  */
 
-const WebhookHandler = require('../handlers/webhookHandler');
+const { getWebhookHandler } = require('../handlers/webhookHandlerSingleton');
 const { webhookLogger } = require('../utils/logger');
 
 class WebhookController {
   constructor() {
-    this.webhookHandler = new WebhookHandler();
+    // 🛡️ SINGLETON - Usar instância única compartilhada
+    // Evita reinicialização do cache com hot reload/redeploy
+    this.webhookHandler = getWebhookHandler();
   }
 
   /**
