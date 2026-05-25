@@ -214,7 +214,28 @@ class SessionController {
 
       // 🟢 CASO 2: EXISTE E JÁ CONECTADO
       if (connectionState && connectionState.connected) {
-        console.log('🟢 INSTANCE EXISTS AND CONNECTED - RETURNING SESSION');
+        console.log('🟢 INSTANCE EXISTS AND CONNECTED');
+        
+        // 🛡️ CRÍTICO: Atualizar banco quando detectar conexão via polling
+        // Isso garante sincronização entre Evolution API e banco de dados
+        console.log('💾 UPDATING DATABASE WITH CONNECTED STATUS (polling detection)');
+        try {
+          await this.supabaseService.client
+            .from('whatsapp_sessions')
+            .update({
+              connection_status: 'connected',
+              qr_code: null,
+              last_activity: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            })
+            .eq('store_id', storeId);
+          
+          console.log('✅ DATABASE UPDATED WITH CONNECTED STATUS');
+        } catch (dbError) {
+          console.error('❌ FAILED TO UPDATE DATABASE:', dbError);
+          // Continuar mesmo se falhar - não bloquear o fluxo
+        }
+        
         return {
           success: true,
           status: 'already_connected',
@@ -412,28 +433,41 @@ class SessionController {
         };
       }
 
-      // Se estiver conectado no banco, verificar status real na Evolution
-      if (session.connection_status === 'connected') {
-        try {
-          const instanceName = `store_${storeId}`;
-          const evolutionStatus = await this.evolutionService.getConnectionState(instanceName);
+      // 🛡️ CRÍTICO: Sempre verificar status real na Evolution API
+      // Isso garante sincronização mesmo quando banco está desatualizado
+      try {
+        const instanceName = `store_${storeId}`;
+        const evolutionStatus = await this.evolutionService.getConnectionState(instanceName);
 
-          // 🛡️ MAPEAR STATUS EVOLUTION PARA STATUS DO BANCO antes de comparar
-          const mappedEvolutionStatus = this.evolutionService.mapConnectionStatus(evolutionStatus.rawState);
+        // 🛡️ MAPEAR STATUS EVOLUTION PARA STATUS DO BANCO antes de comparar
+        const mappedEvolutionStatus = this.evolutionService.mapConnectionStatus(evolutionStatus.rawState);
 
-          // Se status divergir, atualizar banco
-          if (mappedEvolutionStatus !== session.connection_status) {
-            await this.supabaseService.updateConnectionStatus(
-              storeId,
-              mappedEvolutionStatus
-            );
+        // Se status divergir, atualizar banco
+        if (mappedEvolutionStatus !== session.connection_status) {
+          console.log(`🔄 STATUS DIVERGENCE DETECTED - Bank: ${session.connection_status}, Evolution: ${mappedEvolutionStatus}`);
+          console.log('💾 UPDATING DATABASE TO MATCH EVOLUTION STATUS');
+          
+          await this.supabaseService.updateConnectionStatus(
+            storeId,
+            mappedEvolutionStatus
+          );
 
-            session.connection_status = mappedEvolutionStatus;
+          session.connection_status = mappedEvolutionStatus;
+          
+          // 🛡️ Se conectou, limpar QR
+          if (mappedEvolutionStatus === 'connected') {
+            await this.supabaseService.client
+              .from('whatsapp_sessions')
+              .update({ qr_code: null })
+              .eq('store_id', storeId);
+            session.qr_code = null;
           }
-        } catch (error) {
-          controllerLogger.warn(`Failed to verify Evolution status for store ${storeId}:`, error);
-          // Manter status do banco se falhar verificação
+          
+          console.log('✅ DATABASE SYNCED WITH EVOLUTION STATUS');
         }
+      } catch (error) {
+        controllerLogger.warn(`Failed to verify Evolution status for store ${storeId}:`, error);
+        // Manter status do banco se falhar verificação
       }
 
       return {

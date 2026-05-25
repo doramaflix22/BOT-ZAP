@@ -638,10 +638,11 @@ class EvolutionService {
           }
           
         } catch (listError) {
-          // fetchInstances falhou → NÃO PODE CRIAR sem confirmação
-          canCreate = false;
-          source = 'getInstanceInfo-404-fallback-failed';
-          logger.warn(`⚠️ fetchInstances failed, cannot create without confirmation: ${instanceName}`);
+          // fetchInstances falhou após 404 confirmado → permitir criação
+          // getInstanceInfo já confirmou 404 real, listInstances é apenas segurança adicional
+          canCreate = true;
+          source = 'getInstanceInfo-404-listfailed-allow';
+          logger.warn(`⚠️ fetchInstances failed after confirmed 404, allowing creation: ${instanceName}`);
         }
         
       } else {

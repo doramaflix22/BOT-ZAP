@@ -368,8 +368,9 @@ class WebhookHandler {
       // 🛡️ FIX: Salvar string base64 no cache APENAS UMA VEZ (não objeto)
       // Isso previne inconsistência na comparação de duplicados
       this.lastQrByInstance.set(instanceName, qrString);
-      
+
       // Log com pairingCode para debug
+      const pairingCode = qrData?.qrcode?.pairingCode;
       if (pairingCode) {
         console.log(`🔑 Pairing Code: ${pairingCode}`);
       }
