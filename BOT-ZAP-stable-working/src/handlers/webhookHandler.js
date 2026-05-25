@@ -33,15 +33,13 @@ class WebhookHandler {
    */
   async processWebhook(webhookData) {
     try {
-      console.log('\n🔥 WEBHOOK PROCESSING START');
-      // 🛡️ LOG LEVE - sem base64 pesado
-      console.log({
+      console.log('🔥 WEBHOOK:', {
         event: webhookData.event,
         instance: webhookData.instance,
-        hasQr: !!webhookData.data?.qrcode,
-        pairingCode: webhookData.data?.qrcode?.pairingCode
+        remoteJid: webhookData.data?.key?.remoteJid || webhookData.data?.messages?.[0]?.key?.remoteJid,
+        fromMe: webhookData.data?.key?.fromMe ?? webhookData.data?.messages?.[0]?.key?.fromMe,
+        type: webhookData.data?.type
       });
-      console.log('========================\n');
 
       const { event, instance, data } = webhookData;
 
@@ -50,12 +48,6 @@ class WebhookHandler {
         webhookLogger.debug(`Ignoring historySyncNotification for ${instance}`);
         return { success: true, ignored: true, reason: 'historySyncNotification ignored' };
       }
-
-      console.log('🎯 EXTRACTED VALUES:');
-      console.log('Event:', event);
-      console.log('Instance:', instance);
-      console.log('Data exists:', !!data);
-      console.log('Data keys:', data ? Object.keys(data) : 'null');
 
       // Deduplicação de webhook
       const webhookKey = this.generateWebhookKey(event, instance, data);
@@ -113,18 +105,8 @@ class WebhookHandler {
    */
   async handleMessageUpsert(instanceName, messageData) {
     try {
-      console.log('\n🔥 MESSAGE UPSERT PROCESSING');
-      console.log({
-        instance: instanceName,
-        type: messageData?.type,
-        hasMessage: !!messageData,
-        messageType: messageData?.message?.conversation ? 'text' : 'other'
-      });
-      console.log('========================\n');
-
       // Ignorar mensagens históricas (sync de histórico do WhatsApp)
       // Evolution API usa type='notify' para mensagens em tempo real
-      // type='append' ou ausente indica histórico/sincronização
       if (messageData?.type && messageData.type !== 'notify') {
         webhookLogger.debug(`Ignoring non-realtime message type='${messageData.type}' for ${instanceName}`);
         return { success: false, reason: `Ignored: type=${messageData.type}` };
@@ -134,7 +116,7 @@ class WebhookHandler {
 
       // Extrair informações da mensagem
       const messageInfo = this.extractMessageInfo(messageData);
-      
+
       if (!messageInfo) {
         webhookLogger.warn('Invalid message format received');
         return { success: false, reason: 'Invalid message format' };
@@ -149,10 +131,12 @@ class WebhookHandler {
         isFromMe
       } = messageInfo;
 
-      // Ignorar mensagens anteriores ao momento em que o bot ligou (segurança extra)
-      const msgTs = typeof timestamp === 'number' ? timestamp : parseInt(timestamp);
-      if (msgTs && msgTs < this.startTime) {
-        webhookLogger.debug(`Ignoring historical message ts=${msgTs} (bot started at ${this.startTime}) for ${instanceName}`);
+      console.log('📨 MSG:', { instance: instanceName, remoteJid, messageType, isFromMe, ts: timestamp });
+
+      // Ignorar mensagens anteriores ao momento em que o bot ligou
+      // timestamp sempre chega como Unix seconds (número) após a correção no extractMessageInfo
+      if (timestamp < this.startTime) {
+        webhookLogger.debug(`Ignoring historical message ts=${timestamp} (bot started at ${this.startTime})`);
         return { success: false, reason: 'Historical message ignored' };
       }
 
@@ -449,108 +433,78 @@ class WebhookHandler {
    */
   extractMessageInfo(messageData) {
     try {
-      console.log('🧪 EXTRACTING MESSAGE INFO FROM:', JSON.stringify(messageData, null, 2));
-      
-      // 🛡️ Evolution API pode enviar diferentes formatos
-      let message = null;
-      
-      // Formato 1: { messages: [...] }
+      // Evolution API v2 envia dados em formatos diferentes:
+      // Formato A (padrão v2): data = { key, message, messageTimestamp, type, pushName }
+      // Formato B (array):     data = { messages: [{ key, message, messageTimestamp }], type }
+      // Formato C (legado):    data = { message: { key, message, messageTimestamp } }
+
+      let key, msgContent, messageTimestamp;
+
       if (messageData.messages && Array.isArray(messageData.messages)) {
-        message = messageData.messages[0];
-        console.log('📱 Using messages[0] format');
+        // Formato B
+        const first = messageData.messages[0];
+        key = first?.key;
+        msgContent = first?.message;
+        messageTimestamp = first?.messageTimestamp;
+      } else if (messageData.key && messageData.message) {
+        // Formato A — padrão Evolution v2
+        key = messageData.key;
+        msgContent = messageData.message;
+        messageTimestamp = messageData.messageTimestamp;
+      } else if (messageData.message?.key) {
+        // Formato C — mensagem aninhada
+        const inner = messageData.message;
+        key = inner.key;
+        msgContent = inner.message;
+        messageTimestamp = inner.messageTimestamp;
       }
-      // Formato 2: { message: {...} }
-      else if (messageData.message) {
-        message = messageData.message;
-        console.log('📱 Using message format');
-      }
-      // Formato 3: direto no payload
-      else if (messageData.key) {
-        message = messageData;
-        console.log('📱 Using direct payload format');
-      }
-      
-      if (!message) {
-        console.log('❌ No valid message found in payload');
+
+      if (!key || !msgContent) {
+        console.log('❌ extractMessageInfo: key ou message ausentes', { hasKey: !!key, hasMsg: !!msgContent });
         return null;
       }
 
-      console.log('✅ Message extracted:', JSON.stringify(message, null, 2));
+      const messageId = key.id;
+      const remoteJid = key.remoteJid;
+      const isFromMe = key.fromMe || false;
+      // Garantir timestamp como Unix seconds (número) para comparação correta com startTime
+      const timestamp = typeof messageTimestamp === 'number'
+        ? messageTimestamp
+        : Math.floor(Date.now() / 1000);
 
-      // Extrair ID da mensagem
-      const messageId = message.key?.id || message.id;
-      
-      // Extrair remote JID
-      const remoteJid = message.key?.remoteJid || message.remoteJid;
-      
-      // Extrair conteúdo da mensagem
+      // Extrair conteúdo textual
       let messageContent = '';
-      let messageType = 'text';
+      let messageType = 'unknown';
 
-      console.log('🔍 PARSING MESSAGE CONTENT FROM:', JSON.stringify(message.message || {}, null, 2));
-
-      // 🛡️ Estrutura Baileys correta
-      if (message.message?.conversation) {
-        messageContent = message.message.conversation;
+      if (msgContent.conversation) {
+        messageContent = msgContent.conversation;
         messageType = 'text';
-        console.log('✅ Found conversation text:', messageContent);
-      } else if (message.message?.extendedTextMessage?.text) {
-        messageContent = message.message.extendedTextMessage.text;
+      } else if (msgContent.extendedTextMessage?.text) {
+        messageContent = msgContent.extendedTextMessage.text;
         messageType = 'text';
-        console.log('✅ Found extended text:', messageContent);
-      } else if (message.message?.imageMessage?.caption) {
-        messageContent = message.message.imageMessage.caption;
+      } else if (msgContent.imageMessage?.caption) {
+        messageContent = msgContent.imageMessage.caption;
         messageType = 'image';
-        console.log('✅ Found image caption:', messageContent);
-      } else if (message.message?.videoMessage?.caption) {
-        messageContent = message.message.videoMessage.caption;
+      } else if (msgContent.videoMessage?.caption) {
+        messageContent = msgContent.videoMessage.caption;
         messageType = 'video';
-        console.log('✅ Found video caption:', messageContent);
-      } else if (message.message?.audioMessage) {
+      } else if (msgContent.audioMessage) {
         messageContent = '[Áudio]';
         messageType = 'audio';
-        console.log('✅ Found audio message');
-      } else if (message.message?.documentMessage) {
-        messageContent = message.message.documentMessage.fileName || '[Documento]';
+      } else if (msgContent.documentMessage) {
+        messageContent = msgContent.documentMessage.fileName || '[Documento]';
         messageType = 'document';
-        console.log('✅ Found document:', messageContent);
-      } else if (message.text) {
-        messageContent = message.text;
-        messageType = 'text';
-        console.log('✅ Found direct text:', messageContent);
       } else {
-        console.log('❌ No recognizable message content found');
         messageContent = '[Mensagem não suportada]';
         messageType = 'unknown';
       }
 
-      // Extrair timestamp
-      const timestamp = message.messageTimestamp || message.timestamp || new Date().toISOString();
+      console.log('✅ extractMessageInfo:', { messageId, remoteJid, messageType, isFromMe, timestamp });
 
-      // Verificar se é mensagem própria
-      const isFromMe = message.key?.fromMe || message.fromMe || false;
-
-      console.log('🎯 FINAL EXTRACTED INFO:', {
-        messageId,
-        remoteJid,
-        messageContent,
-        messageType,
-        timestamp,
-        isFromMe
-      });
-
-      return {
-        messageId,
-        remoteJid,
-        messageContent,
-        messageType,
-        timestamp,
-        isFromMe
-      };
+      return { messageId, remoteJid, messageContent, messageType, timestamp, isFromMe };
 
     } catch (error) {
-      console.error('🔥 ERROR EXTRACTING MESSAGE INFO:', error);
-      console.error('🔥 STACK TRACE:', error.stack);
+      console.error('extractMessageInfo error:', error.message);
       webhookLogger.error('Error extracting message info:', error);
       return null;
     }
