@@ -249,79 +249,98 @@ class SessionController {
         };
       }
 
-      // 🟡 CASO 3: EXISTE MAS NÃO CONECTADO (REUTILIZAR)
+      // 🟡 CASO 3: EXISTE MAS NÃO CONECTADO (REUTILIZAR - NUNCA CRIAR NOVA)
       if (connectionState && !connectionState.connected) {
-        console.log('🟡 INSTANCE EXISTS BUT NOT CONNECTED');
-        
-        // �️ OBTER PHONE DO BANCO (IGNORAR PHONE DO FRONTEND)
+        console.log('🟡 INSTANCE EXISTS BUT NOT CONNECTED - REUSING EXISTING INSTANCE');
+
+        // 🛡️ OBTER PHONE DO BANCO (preservar dados existentes)
         const existingSession = await this.supabaseService.getSession(storeId);
         const savedPhone = existingSession?.phone;
-        
-        console.log('📋 PHONE COMPARISON:');
-        console.log('Frontend Phone:', cleanPhone);
-        console.log('Saved Phone:', savedPhone);
-        console.log('Match:', cleanPhone === savedPhone);
-        
-        if (savedPhone && cleanPhone !== savedPhone) {
-          console.log('⚠️ PHONE MISMATCH - USING SAVED PHONE:', savedPhone);
-          // Opcional: poderia retornar erro aqui, mas vou continuar com phone salvo
-        }
-        
-        // 🔥 RECUPERAÇÃO DE INSTÂNCIA QUEBRADA
-        if (connectionState.status === 'close' || connectionState.rawState === 'close') {
-          console.log('♻️ Instance exists but is disconnected → forcing reconnect');
-          
-          try {
-            // 🛡️ EVOLUTION API v2 GERA QR AUTOMATICAMENTE
-            // Não precisa mais chamar connectInstance - endpoint não existe mais
-            console.log('🔌 RECONNECTING - QR will arrive via webhook');
-            
-            return {
-              success: true,
-              status: 'connecting',
-              message: 'Instance reconnected - QR will arrive via webhook',
-              data: {
-                instanceName,
-                connectionStatus: 'connecting',
-                phone: savedPhone // Phone salvo no banco
-              }
-            };
-          } catch (reconnectError) {
-            console.log('💥 RECONNECT FAILED:', reconnectError.message);
-            // Fallback para QR normal
+
+        console.log('📋 Session info:', {
+          savedPhone: savedPhone ? '***' + savedPhone.slice(-4) : null,
+          rawState: connectionState.rawState,
+          status: connectionState.status
+        });
+
+        // 🔥 FORÇAR GERAÇÃO DE NOVO QR NA INSTÂNCIA EXISTENTE
+        // Chama GET /instance/connect/{instance} para disparar QR na Evolution
+        // Isso vale para qualquer estado: close, 401, device_removed, etc.
+        console.log('♻️ Triggering new QR on existing instance (no new instance created)');
+
+        try {
+          const qrResult = await this.evolutionService.getQRCode(instanceName);
+          console.log('🔌 QR REQUEST sent to Evolution:', { type: qrResult.type });
+
+          // Se QR retornou diretamente na resposta, salvar no banco imediatamente
+          if (qrResult.base64 || qrResult.code) {
+            const qrCode = qrResult.base64 || qrResult.code;
+            console.log('💾 SAVING DIRECT QR TO DATABASE...');
+            await this.supabaseService.client
+              .from('whatsapp_sessions')
+              .update({
+                qr_code: qrCode,
+                connection_status: 'connecting',
+                last_activity: new Date().toISOString(),
+                updated_at: new Date().toISOString()
+              })
+              .eq('store_id', storeId);
+            console.log('✅ DIRECT QR SAVED TO DATABASE');
+          } else {
+            console.log('🔌 QR will arrive via QRCODE_UPDATED webhook');
           }
+        } catch (qrError) {
+          console.log('⚠️ QR generation request failed (webhook may still deliver it):', qrError.message);
         }
-        
-        console.log('🟡 CONNECTING EXISTING INSTANCE - QR WILL ARRIVE VIA WEBHOOK');
-        // 🛡️ QR VIRÁ VIA WEBHOOK - não chamar getQRCode manualmente
+
         return {
           success: true,
           status: 'connecting',
-          message: 'Connecting existing instance - QR will arrive via webhook',
+          message: 'Reconnecting existing instance - QR generating',
           data: {
             instanceName,
             connectionStatus: 'connecting',
-            phone: savedPhone // Phone salvo no banco
+            phone: savedPhone
           }
         };
       }
 
-      // ❌ CASO 4: EXISTE MAS ESTADO DESCONHECIDO
-      console.log('❌ INSTANCE EXISTS BUT STATE UNKNOWN - ATTEMPTING RECOVERY');
+      // ❌ CASO 4: EXISTE MAS ESTADO DESCONHECIDO - tentar gerar QR mesmo assim
+      console.log('❌ INSTANCE EXISTS BUT STATE UNKNOWN - ATTEMPTING QR RECOVERY');
       try {
-        // 🛡️ QR VIRÁ VIA WEBHOOK - não chamar getQRCode manualmente
+        const qrResult = await this.evolutionService.getQRCode(instanceName);
+        console.log('🔌 QR RECOVERY sent:', { type: qrResult.type });
+
+        if (qrResult.base64 || qrResult.code) {
+          const qrCode = qrResult.base64 || qrResult.code;
+          await this.supabaseService.client
+            .from('whatsapp_sessions')
+            .update({
+              qr_code: qrCode,
+              connection_status: 'connecting',
+              last_activity: new Date().toISOString(),
+              updated_at: new Date().toISOString()
+            })
+            .eq('store_id', storeId);
+        }
+
         return {
           success: true,
           status: 'connecting',
-          message: 'Attempting recovery - QR will arrive via webhook',
+          message: 'Attempting recovery - QR generating',
           data: {
             instanceName,
             connectionStatus: 'connecting'
           }
         };
       } catch (recoveryError) {
-        console.log('💥 Recovery failed:', recoveryError.message);
-        throw new Error('Instance recovery failed');
+        console.log('⚠️ QR recovery request failed:', recoveryError.message);
+        return {
+          success: true,
+          status: 'connecting',
+          message: 'Attempting recovery - QR will arrive via webhook',
+          data: { instanceName, connectionStatus: 'connecting' }
+        };
       }
 
       throw new Error('Unexpected instance state');
