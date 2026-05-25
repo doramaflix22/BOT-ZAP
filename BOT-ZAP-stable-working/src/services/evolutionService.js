@@ -431,21 +431,17 @@ class EvolutionService {
     try {
       logger.info(`Sending text message via ${instanceName} to ${number}`);
 
-      // 🛡️ EXATAMENTE COMO A API PEDE - sem formatação automática
       const payload = {
-        number: number,  // 🛡️ USAR NÚMERO EXATO COMO ENVIADO
+        number: number,
         text: text,
-        delay: options.delay || 123,  // 🛡️ DEFAULT DA API
-        linkPreview: options.linkPreview !== false,
-        mentionsEveryOne: options.mentionsEveryOne || true,  // 🛡️ DEFAULT DA API
-        mentioned: options.mentioned || ['{{remoteJID}}']  // 🛡️ FORMATO DA API
+        delay: options.delay || 1000,
+        linkPreview: options.linkPreview !== false
       };
 
-      // 🛡️ ADICIONAR QUOTED SE FORNECIDO - EXATAMENTE COMO NA API
       if (options.quoted) {
         payload.quoted = {
-          key: { id: options.quoted.id || '<string>' },
-          message: { conversation: options.quoted.message || '<string>' }
+          key: { id: options.quoted.id },
+          message: { conversation: options.quoted.message }
         };
       }
 

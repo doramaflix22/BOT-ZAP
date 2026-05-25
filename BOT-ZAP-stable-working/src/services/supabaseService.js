@@ -351,13 +351,14 @@ class SupabaseService {
    * @param {boolean} isActive - Se está ativo
    * @returns {Promise<Object>} Configuração salva
    */
-  async saveAutoReplyConfig(storeId, messageText, isActive = true) {
+  async saveAutoReplyConfig(storeId, messageText, isActive = true, cooldownHours = null) {
     try {
       const payload = {
         store_id: storeId,
         message_text: messageText,
         is_active: isActive,
-        updated_at: new Date().toISOString()
+        updated_at: new Date().toISOString(),
+        ...(cooldownHours !== null && { cooldown_hours: cooldownHours })
       };
 
       const { data, error } = await this.client

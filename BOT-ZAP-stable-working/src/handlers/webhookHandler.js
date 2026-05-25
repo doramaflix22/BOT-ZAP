@@ -11,15 +11,18 @@ class WebhookHandler {
   constructor() {
     this.autoReplyService = new AutoReplyService();
     this.supabaseService = new SupabaseService();
-    
+
     // Cache para evitar QR Code duplicado
     this.lastQrByInstance = new Map();
-    
+
     // Set para deduplicação de webhooks
     this.processedWebhooks = new Set();
-    
-    // 🛡️ REMOVIDO: Não limpar cache periodicamente
-    // Isso causava reprocessamento de webhooks antigos e QR duplicados
+
+    // Timestamp de inicialização do bot (segundos, formato WhatsApp)
+    // Mensagens anteriores a este momento são históricas e devem ser ignoradas
+    this.startTime = Math.floor(Date.now() / 1000);
+
+    webhookLogger.info(`WebhookHandler initialized. Ignoring messages before ts: ${this.startTime}`);
   }
 
   /**
@@ -111,13 +114,21 @@ class WebhookHandler {
   async handleMessageUpsert(instanceName, messageData) {
     try {
       console.log('\n🔥 MESSAGE UPSERT PROCESSING');
-      // 🛡️ LOG LEVE - sem payload completo
       console.log({
         instance: instanceName,
+        type: messageData?.type,
         hasMessage: !!messageData,
         messageType: messageData?.message?.conversation ? 'text' : 'other'
       });
       console.log('========================\n');
+
+      // Ignorar mensagens históricas (sync de histórico do WhatsApp)
+      // Evolution API usa type='notify' para mensagens em tempo real
+      // type='append' ou ausente indica histórico/sincronização
+      if (messageData?.type && messageData.type !== 'notify') {
+        webhookLogger.debug(`Ignoring non-realtime message type='${messageData.type}' for ${instanceName}`);
+        return { success: false, reason: `Ignored: type=${messageData.type}` };
+      }
 
       webhookLogger.info(`Processing message upsert for ${instanceName}`);
 
@@ -137,6 +148,13 @@ class WebhookHandler {
         timestamp,
         isFromMe
       } = messageInfo;
+
+      // Ignorar mensagens anteriores ao momento em que o bot ligou (segurança extra)
+      const msgTs = typeof timestamp === 'number' ? timestamp : parseInt(timestamp);
+      if (msgTs && msgTs < this.startTime) {
+        webhookLogger.debug(`Ignoring historical message ts=${msgTs} (bot started at ${this.startTime}) for ${instanceName}`);
+        return { success: false, reason: 'Historical message ignored' };
+      }
 
       // Ignorar mensagens próprias
       if (isFromMe) {
