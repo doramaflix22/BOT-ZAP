@@ -41,8 +41,8 @@ class AutoReplyService {
       logger.info(`Processing message for store ${storeId} from ${remoteJid}`);
 
       // 1. Verificar se auto-resposta está ativo para este store
-      const autoReplyConfig = await this.supabaseService.getAutoReplyConfig(storeId);
-      
+      const autoReplyConfig = await this.supabaseService.getAutoReplyConfig(storeId, true);
+
       if (!autoReplyConfig || !autoReplyConfig.is_active) {
         logger.debug(`Auto-reply not active for store ${storeId}`);
         return { success: false, reason: 'Auto-reply not active' };
@@ -196,7 +196,7 @@ class AutoReplyService {
       const storeId = this.extractStoreIdFromInstance(instanceName);
       if (!storeId) return false;
 
-      const autoReplyConfig = await this.supabaseService.getAutoReplyConfig(storeId);
+      const autoReplyConfig = await this.supabaseService.getAutoReplyConfig(storeId, true);
       if (!autoReplyConfig || !autoReplyConfig.is_active) {
         return false;
       }

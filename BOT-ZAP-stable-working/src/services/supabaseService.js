@@ -390,14 +390,19 @@ class SupabaseService {
    * @param {string} storeId - ID do restaurante
    * @returns {Promise<Object|null>} Configuração
    */
-  async getAutoReplyConfig(storeId) {
+  async getAutoReplyConfig(storeId, onlyActive = false) {
     try {
-      const { data, error } = await this.client
+      let query = this.client
         .from('whatsapp_auto_messages')
         .select('*')
-        .eq('store_id', storeId)
-        .eq('is_active', true)
-        .maybeSingle();
+        .eq('store_id', storeId);
+
+      // autoReplyService passa onlyActive=true para não disparar quando desativado
+      if (onlyActive) {
+        query = query.eq('is_active', true);
+      }
+
+      const { data, error } = await query.maybeSingle();
 
       if (error && error.code !== 'PGRST116') {
         throw error;
