@@ -7,6 +7,9 @@ const AutoReplyService = require('../services/autoReplyService');
 const SupabaseService = require('../services/supabaseService');
 const { webhookLogger } = require('../utils/logger');
 
+// Timestamp of when this process started — used to skip historical messages
+const BOT_START_TIME = Math.floor(Date.now() / 1000);
+
 class WebhookHandler {
   constructor() {
     this.autoReplyService = new AutoReplyService();
@@ -30,15 +33,10 @@ class WebhookHandler {
    */
   async processWebhook(webhookData) {
     try {
-      console.log('\n🔥 WEBHOOK PROCESSING START');
-      // 🛡️ LOG LEVE - sem base64 pesado
-      console.log({
+      webhookLogger.debug('Webhook received', {
         event: webhookData.event,
-        instance: webhookData.instance,
-        hasQr: !!webhookData.data?.qrcode,
-        pairingCode: webhookData.data?.qrcode?.pairingCode
+        instance: webhookData.instance
       });
-      console.log('========================\n');
 
       const { event, instance, data } = webhookData;
 
@@ -47,12 +45,6 @@ class WebhookHandler {
         webhookLogger.debug(`Ignoring historySyncNotification for ${instance}`);
         return { success: true, ignored: true, reason: 'historySyncNotification ignored' };
       }
-
-      console.log('🎯 EXTRACTED VALUES:');
-      console.log('Event:', event);
-      console.log('Instance:', instance);
-      console.log('Data exists:', !!data);
-      console.log('Data keys:', data ? Object.keys(data) : 'null');
 
       // Deduplicação de webhook
       const webhookKey = this.generateWebhookKey(event, instance, data);
@@ -90,11 +82,11 @@ class WebhookHandler {
       }
 
     } catch (error) {
-      console.error('\n💥 WEBHOOK PROCESSING ERROR');
-      console.error('Error:', error.message);
-      console.error('Stack:', error.stack);
-      console.error('Full webhook data:', JSON.stringify(webhookData, null, 2));
-      console.error('========================\n');
+      webhookLogger.error('Webhook processing error', {
+        event: webhookData?.event,
+        instance: webhookData?.instance,
+        error: error.message
+      });
       
       webhookLogger.error('Error processing webhook:', error);
       return { success: false, error: error.message };
@@ -110,15 +102,6 @@ class WebhookHandler {
    */
   async handleMessageUpsert(instanceName, messageData) {
     try {
-      console.log('\n🔥 MESSAGE UPSERT PROCESSING');
-      // 🛡️ LOG LEVE - sem payload completo
-      console.log({
-        instance: instanceName,
-        hasMessage: !!messageData,
-        messageType: messageData?.message?.conversation ? 'text' : 'other'
-      });
-      console.log('========================\n');
-
       webhookLogger.info(`Processing message upsert for ${instanceName}`);
 
       // Extrair informações da mensagem
@@ -142,6 +125,13 @@ class WebhookHandler {
       if (isFromMe) {
         webhookLogger.debug(`Ignoring own message: ${messageId}`);
         return { success: false, reason: 'Own message ignored' };
+      }
+
+      // Ignorar mensagens históricas anteriores ao startup do bot
+      const msgTimestamp = typeof timestamp === 'number' ? timestamp : parseInt(timestamp, 10);
+      if (!isNaN(msgTimestamp) && msgTimestamp < BOT_START_TIME) {
+        webhookLogger.debug(`Skipping historical message ${messageId} (ts=${msgTimestamp} < start=${BOT_START_TIME})`);
+        return { success: false, reason: 'Historical message skipped' };
       }
 
       // Ignorar mensagens de grupo
@@ -194,8 +184,6 @@ class WebhookHandler {
       };
 
     } catch (error) {
-      console.error('🔥 ERROR REAL NO PROCESSAMENTO:', error);
-      console.error('🔥 STACK TRACE:', error.stack);
       webhookLogger.error('Error handling message upsert:', error);
       return { success: false, error: error.message };
     }
@@ -239,8 +227,6 @@ class WebhookHandler {
         // 🛡️ LIMPAR CACHE DE QR quando conectar
         this.lastQrByInstance.delete(instanceName);
         
-        console.log('🔍 CONNECTION UPDATE USER DATA:', JSON.stringify(connectionData.user, null, 2));
-        
         if (connectionData.user) {
           const phone = connectionData.user.id?.replace('@s.whatsapp.net', '') || null;
           const profileName = connectionData.user.name || null;
@@ -248,20 +234,11 @@ class WebhookHandler {
           updateFields.phone = phone;
           updateFields.profile_name = profileName;
           
-          console.log('🎯 EXTRACTED USER INFO:', {
-            phone,
-            profileName,
-            originalId: connectionData.user.id
-          });
+          webhookLogger.debug(`Connection user info: phone=${phone}, name=${profileName}`);
         }
       }
 
       // 🛡️ SALVAR CONNECTION UPDATE NO BANCO
-      console.log('💾 SAVING CONNECTION UPDATE TO DATABASE...');
-      console.log('Instance:', instanceName);
-      console.log('Status:', mappedStatus);
-      console.log('Update Fields:', Object.keys(updateFields));
-      
       try {
         // 🛡️ FIX: Use UPDATE with specific fields only
         // This prevents overwriting qr_code and other fields that shouldn't be touched by connection updates
@@ -273,15 +250,14 @@ class WebhookHandler {
           .maybeSingle();
 
         if (result.error) {
-          console.error('❌ FAILED TO UPDATE CONNECTION:', result.error);
+          webhookLogger.error('Failed to update connection status', { error: result.error.message });
           throw result.error;
         }
 
-        console.log('✅ CONNECTION UPDATE SAVED SUCCESSFULLY (UPDATE)');
-        console.log('Result Session:', result.data);
+        webhookLogger.info(`Connection status saved: ${instanceName} → ${mappedStatus}`);
 
       } catch (saveError) {
-        console.error('💥 CONNECTION UPDATE SAVE ERROR:', saveError);
+        webhookLogger.error('Connection update save error:', saveError);
         throw saveError;
       }
 
@@ -316,16 +292,6 @@ class WebhookHandler {
    */
   async handleQRCodeUpdated(instanceName, qrData) {
     try {
-      console.log('\n🔥 QR WEBHOOK PROCESSING');
-      // 🛡️ LOG LEVE - sem base64 pesado
-      console.log({
-        instance: instanceName,
-        hasQr: !!qrData?.qrcode,
-        pairingCode: qrData?.qrcode?.pairingCode,
-        qrLength: qrData?.qrcode?.base64?.length || 0
-      });
-      console.log('========================\n');
-
       webhookLogger.info(`Processing QR code update for ${instanceName}`);
 
       // 🛡️ EXTRAIR storeId DO instance_name (CRÍTICO)
@@ -340,10 +306,8 @@ class WebhookHandler {
       // Formato novo: { pairingCode, code, base64 }
       const qrcode = qrData?.qrcode?.base64 || qrData?.qrcode?.code || qrData?.base64 || qrData?.code || qrData?.qrcode;
       
-      console.log('🎯 EXTRACTED QR:', qrcode ? 'FOUND' : 'NOT FOUND');
-      console.log('QR Type:', typeof qrcode);
-      console.log('QR Length:', qrcode?.length || 0);
-      
+      webhookLogger.debug(`QR extracted for ${instanceName}: ${qrcode ? 'found' : 'not found'} (len=${qrcode?.length || 0})`);
+
       // 🛡️ REMOVIDO: Não bloquear QR updates legítimos
       // QR novo deve sempre sobrescrever o antigo (reconexões, expiração, etc)
       
@@ -360,7 +324,6 @@ class WebhookHandler {
       
       // 🛡️ VALIDAÇÃO CRÍTICA - QR pode ser null
       if (!qrcode) {
-        console.log('❌ NO QR CODE FOUND IN PAYLOAD - IGNORING');
         webhookLogger.warn(`No QR code found in webhook payload for ${instanceName}`);
         return { success: false, reason: 'No QR code in payload' };
       }
@@ -369,17 +332,7 @@ class WebhookHandler {
       // Isso previne inconsistência na comparação de duplicados
       this.lastQrByInstance.set(instanceName, qrString);
 
-      // Log com pairingCode para debug
-      const pairingCode = qrData?.qrcode?.pairingCode;
-      if (pairingCode) {
-        console.log(`🔑 Pairing Code: ${pairingCode}`);
-      }
-      
       // 🛡️ SALVAR QR DIRETAMENTE USANDO instance_name
-      console.log('💾 SAVING QR TO DATABASE...');
-      console.log('Instance Name:', instanceName);
-      console.log('QR Length:', qrcode?.length || 0);
-      
       try {
         // 🛡️ FIX: Use UPDATE instead of UPSERT to only update QR field
         // This prevents overwriting other fields like phone, connection_status, etc.
@@ -396,15 +349,14 @@ class WebhookHandler {
           .maybeSingle();
 
         if (result.error) {
-          console.error('❌ FAILED TO UPDATE QR:', result.error);
+          webhookLogger.error('Failed to save QR code', { error: result.error.message });
           throw result.error;
         }
 
-        console.log('✅ QR SAVED SUCCESSFULLY (UPDATE)');
-        console.log('Result Session:', result.data);
+        webhookLogger.info(`QR code saved for ${instanceName}`);
 
       } catch (saveError) {
-        console.error('💥 QR SAVE ERROR:', saveError);
+        webhookLogger.error('QR save error:', saveError);
         throw saveError;
       }
 
@@ -431,33 +383,32 @@ class WebhookHandler {
    */
   extractMessageInfo(messageData) {
     try {
-      console.log('🧪 EXTRACTING MESSAGE INFO FROM:', JSON.stringify(messageData, null, 2));
-      
       // 🛡️ Evolution API pode enviar diferentes formatos
       let message = null;
+      let messageFormat = null;
       
       // Formato 1: { messages: [...] }
       if (messageData.messages && Array.isArray(messageData.messages)) {
         message = messageData.messages[0];
-        console.log('📱 Using messages[0] format');
+        messageFormat = 'messages[0]';
       }
       // Formato 2: { message: {...} }
       else if (messageData.message) {
         message = messageData.message;
-        console.log('📱 Using message format');
+        messageFormat = 'message';
       }
       // Formato 3: direto no payload
       else if (messageData.key) {
         message = messageData;
-        console.log('📱 Using direct payload format');
+        messageFormat = 'direct';
       }
       
       if (!message) {
-        console.log('❌ No valid message found in payload');
+        webhookLogger.warn('No valid message found in payload');
         return null;
       }
 
-      console.log('✅ Message extracted:', JSON.stringify(message, null, 2));
+      webhookLogger.debug(`Message format: ${messageFormat}`);
 
       // Extrair ID da mensagem
       const messageId = message.key?.id || message.id;
@@ -469,39 +420,30 @@ class WebhookHandler {
       let messageContent = '';
       let messageType = 'text';
 
-      console.log('🔍 PARSING MESSAGE CONTENT FROM:', JSON.stringify(message.message || {}, null, 2));
-
       // 🛡️ Estrutura Baileys correta
       if (message.message?.conversation) {
         messageContent = message.message.conversation;
         messageType = 'text';
-        console.log('✅ Found conversation text:', messageContent);
       } else if (message.message?.extendedTextMessage?.text) {
         messageContent = message.message.extendedTextMessage.text;
         messageType = 'text';
-        console.log('✅ Found extended text:', messageContent);
       } else if (message.message?.imageMessage?.caption) {
         messageContent = message.message.imageMessage.caption;
         messageType = 'image';
-        console.log('✅ Found image caption:', messageContent);
       } else if (message.message?.videoMessage?.caption) {
         messageContent = message.message.videoMessage.caption;
         messageType = 'video';
-        console.log('✅ Found video caption:', messageContent);
       } else if (message.message?.audioMessage) {
         messageContent = '[Áudio]';
         messageType = 'audio';
-        console.log('✅ Found audio message');
       } else if (message.message?.documentMessage) {
         messageContent = message.message.documentMessage.fileName || '[Documento]';
         messageType = 'document';
-        console.log('✅ Found document:', messageContent);
       } else if (message.text) {
         messageContent = message.text;
         messageType = 'text';
-        console.log('✅ Found direct text:', messageContent);
       } else {
-        console.log('❌ No recognizable message content found');
+        webhookLogger.debug('No recognizable message content found');
         messageContent = '[Mensagem não suportada]';
         messageType = 'unknown';
       }
@@ -512,12 +454,10 @@ class WebhookHandler {
       // Verificar se é mensagem própria
       const isFromMe = message.key?.fromMe || message.fromMe || false;
 
-      console.log('🎯 FINAL EXTRACTED INFO:', {
+      webhookLogger.debug('Message info extracted', {
         messageId,
         remoteJid,
-        messageContent,
         messageType,
-        timestamp,
         isFromMe
       });
 
@@ -531,8 +471,6 @@ class WebhookHandler {
       };
 
     } catch (error) {
-      console.error('🔥 ERROR EXTRACTING MESSAGE INFO:', error);
-      console.error('🔥 STACK TRACE:', error.stack);
       webhookLogger.error('Error extracting message info:', error);
       return null;
     }
