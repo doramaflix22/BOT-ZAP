@@ -11,6 +11,9 @@ class SessionController {
   constructor() {
     this.evolutionService = new EvolutionService();
     this.supabaseService = new SupabaseService();
+    // Lock em memória para evitar múltiplos connect() simultâneos por store
+    // Protege o caso em que não existe sessão no banco (UPDATE do lock afetaria 0 linhas)
+    this._connectingStores = new Set();
   }
 
   /**
@@ -70,6 +73,18 @@ class SessionController {
       console.log('========================\n');
 
       controllerLogger.info(`Starting WhatsApp connection for store: ${storeId}`);
+
+      // 🔒 LOCK EM MEMÓRIA — bloqueia imediatamente, antes mesmo de checar o banco.
+      // O lock no banco falhava silenciosamente quando não existia sessão (UPDATE = 0 linhas).
+      if (this._connectingStores.has(storeId)) {
+        console.log('⚠️ CONNECT ALREADY IN PROGRESS (memory lock) - ABORTING');
+        return {
+          success: false,
+          message: 'Connection already in progress',
+          code: 'CONNECTION_IN_PROGRESS'
+        };
+      }
+      this._connectingStores.add(storeId);
 
       // 🛡️ TRAVA ANTI-DUPLICAÇÃO MELHORADA - Verificação mais robusta
       console.log('🔒 CHECKING CONNECTION LOCK...');
@@ -348,24 +363,30 @@ class SessionController {
     } catch (error) {
       const connectEnd = Date.now();
       const duration = connectEnd - connectStart;
-      
+
       console.log('\n💥💥💥 CONNECT FAILED 💥💥💥');
       console.log('Connect ID:', connectId);
       console.log('Duration:', `${duration}ms`);
       console.log('Error:', error.message);
       console.log('💥💥💥 END CONNECT FAILED 💥💥💥\n');
-      
+
       controllerLogger.error(`Failed to connect WhatsApp for store ${storeId}:`, error);
-      
-      // 🛡️ LIBERAR LOCK EM CASO DE ERRO
+
+      // Liberar lock em memória
+      this._connectingStores.delete(storeId);
+
+      // 🛡️ LIBERAR LOCK NO BANCO EM CASO DE ERRO
       try {
-        await this.supabaseService.updateConnectionStatus(storeId, 'disconnected'); // 🛡️ STATUS VÁLIDO
+        await this.supabaseService.updateConnectionStatus(storeId, 'disconnected');
         console.log('🔓 CONNECTION LOCK RELEASED (ERROR)');
       } catch (lockError) {
         console.error('Failed to release connection lock:', lockError);
       }
-      
+
       throw error;
+    } finally {
+      // Garantir que o lock em memória seja sempre liberado
+      this._connectingStores.delete(storeId);
     }
   }
 

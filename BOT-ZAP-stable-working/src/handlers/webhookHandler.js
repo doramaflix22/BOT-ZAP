@@ -383,26 +383,29 @@ class WebhookHandler {
       console.log('QR Length:', qrcode?.length || 0);
       
       try {
-        // 🛡️ FIX: Use UPDATE instead of UPSERT to only update QR field
-        // This prevents overwriting other fields like phone, connection_status, etc.
+        // UPSERT garante que a sessão é criada mesmo que não exista ainda.
+        // UPDATE silencioso afetava 0 linhas quando sessão não existia → QR nunca salvo.
+        // user_id == store_id (confirmado no banco — mesma UUID do auth).
         const result = await this.supabaseService.client
           .from('whatsapp_sessions')
-          .update({
+          .upsert({
+            store_id: storeId,
+            user_id: storeId,
+            instance_name: instanceName,
             qr_code: qrcode,
             connection_status: 'connecting',
             last_activity: new Date().toISOString(),
             updated_at: new Date().toISOString()
-          })
-          .eq('store_id', storeId)
+          }, { onConflict: 'store_id' })
           .select()
           .maybeSingle();
 
         if (result.error) {
-          console.error('❌ FAILED TO UPDATE QR:', result.error);
+          console.error('❌ FAILED TO UPSERT QR:', result.error);
           throw result.error;
         }
 
-        console.log('✅ QR SAVED SUCCESSFULLY (UPDATE)');
+        console.log('✅ QR SAVED SUCCESSFULLY (UPSERT)');
         console.log('Result Session:', result.data);
 
       } catch (saveError) {

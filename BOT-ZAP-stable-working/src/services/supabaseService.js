@@ -45,6 +45,7 @@ class SupabaseService {
     try {
       const payload = {
         store_id: storeId,
+        user_id: storeId,        // user_id == store_id (mesma UUID do auth)
         instance_name: instanceName,
         connection_status: 'connecting',
         last_activity: new Date().toISOString(),
