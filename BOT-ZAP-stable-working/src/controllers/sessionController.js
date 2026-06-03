@@ -461,18 +461,26 @@ class SessionController {
         // 🛡️ MAPEAR STATUS EVOLUTION PARA STATUS DO BANCO antes de comparar
         const mappedEvolutionStatus = this.evolutionService.mapConnectionStatus(evolutionStatus.rawState);
 
-        // Se status divergir, atualizar banco
-        if (mappedEvolutionStatus !== session.connection_status) {
+        // 🛡️ PROTEÇÃO DO QR: Evolution retorna 'close' enquanto aguarda o scan
+        // do QR — isso é comportamento NORMAL, não é divergência real.
+        // Só downgrade connecting→disconnected se não houver QR ativo no banco.
+        const isWaitingForQRScan =
+          session.connection_status === 'connecting' &&
+          mappedEvolutionStatus === 'disconnected' &&
+          !!session.qr_code;
+
+        // Se status divergir E não for o caso de espera por scan, atualizar banco
+        if (mappedEvolutionStatus !== session.connection_status && !isWaitingForQRScan) {
           console.log(`🔄 STATUS DIVERGENCE DETECTED - Bank: ${session.connection_status}, Evolution: ${mappedEvolutionStatus}`);
           console.log('💾 UPDATING DATABASE TO MATCH EVOLUTION STATUS');
-          
+
           await this.supabaseService.updateConnectionStatus(
             storeId,
             mappedEvolutionStatus
           );
 
           session.connection_status = mappedEvolutionStatus;
-          
+
           // 🛡️ Se conectou, limpar QR
           if (mappedEvolutionStatus === 'connected') {
             await this.supabaseService.client
@@ -481,8 +489,10 @@ class SessionController {
               .eq('store_id', storeId);
             session.qr_code = null;
           }
-          
+
           console.log('✅ DATABASE SYNCED WITH EVOLUTION STATUS');
+        } else if (isWaitingForQRScan) {
+          console.log('📱 QR aguardando scan — mantendo status connecting e QR preservado');
         }
       } catch (error) {
         controllerLogger.warn(`Failed to verify Evolution status for store ${storeId}:`, error);
@@ -552,32 +562,28 @@ class SessionController {
         };
       }
 
-      // Se tiver QR no banco, SÓ RETORNAR se status for 'connecting'
-      // Isso previne QR morto sendo retornado quando desconectado
+      // Se tiver QR no banco, retornar sempre que não estiver conectado
+      // O status pode estar temporariamente desatualizado por race condition com getStatus
       if (session.qr_code) {
         console.log('✅ QR FOUND IN DATABASE');
         console.log('QR Length:', session.qr_code.length);
         console.log('Connection Status:', session.connection_status);
 
-        // 🛡️ SÓ RETORNAR QR SE ESTIVER EM ESTADO DE CONEXÃO VÁLIDO
-        if (session.connection_status === 'connecting') {
+        // Retornar QR se status for connecting OU se ainda não estiver conectado
+        // (status 'disconnected' pode ser race condition — QR ainda pode ser válido)
+        if (session.connection_status !== 'connected') {
+          // Garantir que o status fique 'connecting' enquanto QR existe
+          if (session.connection_status !== 'connecting') {
+            await this.supabaseService.client
+              .from('whatsapp_sessions')
+              .update({ connection_status: 'connecting' })
+              .eq('store_id', storeId);
+          }
           return {
             success: true,
             data: {
               qr: session.qr_code,
-              status: session.connection_status
-            }
-          };
-        } else {
-          // 🛡️ QR EXISTE MAS STATUS NÃO É VÁLIDO - LIMPAR E NÃO RETORNAR
-          console.log('⚠️ QR EXISTS BUT STATUS IS NOT CONNECTING - CLEARING QR');
-          await this.supabaseService.clearQRCode(storeId);
-          return {
-            success: true,
-            data: {
-              qr: null,
-              status: session.connection_status,
-              message: 'QR expired - wait for new QR via webhook'
+              status: 'connecting'
             }
           };
         }

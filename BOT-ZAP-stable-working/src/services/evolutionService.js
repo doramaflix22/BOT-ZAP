@@ -138,10 +138,11 @@ class EvolutionService {
             'Content-Type': 'application/json'
           },
           events: [
-            "QRCODE_UPDATED",     // 🛡️ ESSENCIAL: QR Code atualizado
-            "CONNECTION_UPDATE",   // 🛡️ ESSENCIAL: Mudanças de status
-            "APPLICATION_STARTUP", // 🛡️ ÚTIL: Inicialização da instância
-            "INSTANCE_DELETE"      // 🛡️ ÚTIL: Instância deletada
+            "MESSAGES_UPSERT",     // ESSENCIAL: Mensagens recebidas (dispara auto-reply)
+            "QRCODE_UPDATED",      // ESSENCIAL: QR Code atualizado
+            "CONNECTION_UPDATE",   // ESSENCIAL: Mudanças de status
+            "APPLICATION_STARTUP", // ÚTIL: Inicialização da instância
+            "INSTANCE_DELETE"      // ÚTIL: Instância deletada
           ]
         }
       };
@@ -366,7 +367,10 @@ class EvolutionService {
         webhookByEvents: false,
         webhookBase64: true,
         events: [
-          "APPLICATION_STARTUP"  // 🛡️ EXATAMENTE como na documentação da API
+          "MESSAGES_UPSERT",    // ESSENCIAL: Mensagens recebidas (dispara auto-reply)
+          "QRCODE_UPDATED",     // ESSENCIAL: QR Code atualizado
+          "CONNECTION_UPDATE",  // ESSENCIAL: Mudanças de status
+          "APPLICATION_STARTUP"
         ]
       };
 

@@ -590,37 +590,21 @@ class WebhookHandler {
   generateWebhookKey(event, instance, data) {
     let dataHash = '';
     
-    // Para mensagens, usar ID da mensagem
-    if (event.includes('message') && data?.key?.id) {
-      dataHash = data.key.id;
-    }
-    // Para QR Code, usar hash do base64 (não pairingCode - pode repetir em reconnects)
-    else if (event.toLowerCase().includes('qrcode') && data?.qrcode) {
-      // 🛡️ CORREÇÃO: Usar apenas base64 para dedupe (pairingCode repete em reconnects)
+    if (event.includes('message')) {
+      // Suporta formato A (data.key.id) e formato B array (data.messages[0].key.id)
+      const msgId = data?.key?.id || data?.messages?.[0]?.key?.id;
+      dataHash = msgId || `msg:${JSON.stringify(data || {}).substring(0, 150)}`;
+    } else if (event.toLowerCase().includes('qrcode') && data?.qrcode) {
       const qrBase64 = data.qrcode?.base64 || data.qrcode?.code;
-      
-      if (qrBase64) {
-        // Use first 50 chars of base64 as hash
-        dataHash = `base64:${qrBase64.substring(0, 50)}`;
-      } else {
-        // Last resort: use object structure hash
-        dataHash = `obj:${JSON.stringify(data.qrcode).substring(0, 50)}`;
-      }
-    }
-    // Para connection, usar state + user info (se disponível) para deduplicação estável
-    else if (event.toLowerCase().includes('connection')) {
+      dataHash = qrBase64
+        ? `base64:${qrBase64.substring(0, 50)}`
+        : `obj:${JSON.stringify(data.qrcode).substring(0, 50)}`;
+    } else if (event.toLowerCase().includes('connection')) {
       const state = data?.state || 'unknown';
       const userId = data?.user?.id || 'no-user';
-      // 🛡️ FIX: Use state + user ID instead of Date.now() for stable deduplication
-      // This prevents duplicate connection events from being processed
       dataHash = `${state}:${userId}`;
-    }
-    // Para outros eventos, usar hash estável dos dados
-    else {
-      // 🛡️ FIX: Use hash of data content instead of Date.now()
-      // This ensures same data produces same key
-      const dataStr = JSON.stringify(data || {}).substring(0, 100);
-      dataHash = `data:${dataStr}`;
+    } else {
+      dataHash = `data:${JSON.stringify(data || {}).substring(0, 100)}`;
     }
     
     return `${event}:${instance}:${dataHash}`;
